@@ -9,14 +9,14 @@ class myjson:
         self.data = OrderedDict()
         self.path = ''
         
-        if filename is not None: self.open(filename)
+        if filename is not None: self.load(filename)
         elif parent is not None:
             self.file = parent.file
             self.data = data
             self.path = parent.path + path
 
 
-    def open(self, filename):
+    def load(self, filename):
         if not os.path.isfile(filename):
             print('Error: Cannot find file "{0}". Make sure'.format(filename))
             print('       the path is correct and the file is accessible.')
@@ -54,5 +54,8 @@ class myjson:
             return myjson(parent = self, data = json_data, path = value_path)
         else:
             return json_data
-            
+
+
+def load(filename):
+    return myjson(filename)
     

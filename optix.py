@@ -1,4 +1,4 @@
-from myjson import myjson
+import myjson
 from collections import OrderedDict
 import numpy
 import os
@@ -6,6 +6,8 @@ import shutil
 import time
 
 import multiprocessing
+
+numpy.set_printoptions(precision = 14)
 
 
 class objective_model(object):
@@ -119,8 +121,6 @@ class objective_model(object):
 
         # Increment the number of function evaluations
         self.n_fcn_evals += len(design_points)
-        for obj in objective:
-            print("objective = {}".format(obj))
         
         return objective
 
@@ -149,8 +149,7 @@ class objective_model(object):
         objective, gradient = self.obj_fcn_with_gradient((design_point, 0))
         self.n_fcn_evals += 1
         self.n_grad_evals += 1
-        print("objective = {}".format(objective))
-        print("gradient = {}".format(gradient))
+
         return objective, gradient
     
     
@@ -233,7 +232,7 @@ class settings(object):
 
     def load(settings_file):
         self = settings()
-        input = myjson(settings_file)
+        input = myjson.load(settings_file)
             
         # Read settings from JSON file
         json_settings = input.get('settings', OrderedDict)
@@ -264,7 +263,8 @@ class settings(object):
         self.penalty_factor = []
         valid_constraint_types = ['=', '<', '>']
         for const_name in json_constraints.data:
-            const_type = json_constraints.get(const_name + '.type', str)
+            json_constraint_data = json_constraints.get(const_name, OrderedDict)
+            const_type = json_constraint_data.get('type', str)
             if const_type not in valid_constraint_types:
                 print('Unknown constraint type: {0}. Constraint {1} skipped.'
                     .format(const_type, const_name))
@@ -273,9 +273,9 @@ class settings(object):
             
             self.constrainttype.append(const_type)
             self.constraintnames.append(const_name)
-            self.constraintvalues.append(json_constraints.get(const_name + '.value', float))
-            self.penalty.append(json_constraints.get(const_name + '.penalty', float))
-            self.penalty_factor.append(json_constraints.get(const_name + '.factor', float))
+            self.constraintvalues.append(json_constraint_data.get('value', float))
+            self.penalty.append(json_constraint_data.get('penalty', float))
+            self.penalty_factor.append(json_constraint_data.get('factor', float))
             
         return self
 
@@ -283,15 +283,14 @@ class settings(object):
 def optimize(obj_model, settings):
     """
     """
+    header = ('{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'
+        .format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)'))
+    for name in settings.varnames: header += ', {0:>20}'.format(name)
     with open(settings.opt_file, 'w') as opt_file:
-        opt_file.write('iter, o_it, i_it, fitness, alpha, mag(dx)')
-        for name in settings.varnames:  opt_file.write(', {0}'.format(name))
-        opt_file.write('\n')
+        opt_file.write(header + '\n')
     
     with open(settings.grad_file, 'w') as grad_file:
-        grad_file.write('iter, o_it, i_it, fitness, alpha, mag(dx)')
-        for name in settings.varnames: grad_file.write(', {0}'.format(name))
-        grad_file.write('\n')
+        grad_file.write(header + '\n')
     
     print('---------- Variables ----------')
     for i in range(settings.nvars):
@@ -309,10 +308,12 @@ def optimize(obj_model, settings):
     print('     stopping delta: {0}'.format(settings.stop_delta))
     print('')
     
+    iter = 0
     o_iter = 0
     mag_dx = 1.0
+    design_point = settings.varsinit[:]
     while mag_dx > settings.stop_delta:
-        design_point = settings.varsinit[:]
+        design_point_init = numpy.copy(design_point)
         i_iter = 0
         
         print('Constraint Penalties')
@@ -320,13 +321,12 @@ def optimize(obj_model, settings):
             print('{0} {1}'.format(settings.constraintnames[i], settings.penalty[i]))
             
         print('Beginning new update matrix')
-        print('iter outer inner Fitness               alpha                 mag(dx)               Vars --> ')
-        print('---- ----- ----- -------------------   -------------------   -------------------   -------------------')
+        print(header)
         
-        iter = 0
+        alpha = 0.0
         while mag_dx > settings.stop_delta:
             obj_value, gradient = obj_model.evaluate_gradient(design_point)
-            append_file(iter, o_iter, i_iter, obj_value, 0.0, mag_dx, design_point, gradient, settings)
+            append_file(iter, o_iter, i_iter, obj_value, alpha, mag_dx, design_point, gradient, settings)
             
             # Initialize N to the identity matrix
             if (i_iter == 0):
@@ -350,23 +350,23 @@ def optimize(obj_model, settings):
             
             dx = design_point - design_point_prev
             mag_dx = numpy.linalg.norm(dx)
-            i_iter = i_iter + 1
-            iter = iter + 1
+            i_iter += 1
+            iter += 1
             
-        append_file(iter, o_iter, i_iter, obj_value, alpha, mag_dx, design_point, [0.0] * settings.nvars, settings)
 #TODO:        save_file_name = 'optix_save.json'
 #TODO:        self.write_optix_file(save_file_name)
         
-        dx = design_point - design_point_prev
+        dx = design_point - design_point_init
         mag_dx = numpy.linalg.norm(dx)
+        append_file(iter, o_iter, i_iter, obj_value, alpha, mag_dx, design_point, gradient, settings)
         
-        o_iter = o_iter + 1
+        o_iter += 1
         for i in range(settings.nconstraints):
             settings.penalty[i] = settings.penalty[i] * settings.penalty_factor[i]
     
     # Run the final case
-    obj_value = obj_model.evaluate([design_point])
-    append_file(iter, o_iter, i_iter, obj_value, 0.0, mag_dx, [0.0] * settings.nvars, gradient, settings)
+    obj_value = obj_model.obj_fcn((design_point, 0))
+    append_file(iter, o_iter, i_iter, obj_value, 0.0, mag_dx, design_point, gradient, settings)
     return (obj_value, design_point)
     
     
@@ -415,7 +415,9 @@ def line_search(design_point, obj_value, s, obj_model, settings):
         if f2 > f1: alpha = a1
         else: alpha = a2
         
-    design_point = [(design_point[i] + alpha * s[i]) for i in range(len(design_point))]
+    for i in range(len(design_point)):
+        design_point[i] += alpha * s[i]
+
 #TODO:    self.constraints()
     if settings.verbose: print('Final alpha = {0}'.format(alpha))
     return alpha, design_point
@@ -431,24 +433,23 @@ def run_mult_cases(nevals, alpha, s, dp0, obj_fcn0, obj_model):
         design_points.append([(dp0[j] + alphas[i + 1] * s[j]) for j in range(len(dp0))])
 
     # Evaluate the function at each design point
-    obj_fcn_values = [obj_fcn0]
-    obj_fcn_values.extend(obj_model.evaluate(design_points))
+    obj_fcn_values = [obj_fcn0] + obj_model.evaluate(design_points)
     
     return alphas, obj_fcn_values
     
     
 def append_file(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx, design_point, gradient, settings):
-    msg = ('{0}, {1}, {2}, {3}, {4}, {5}'
+    msg = ('{0:4d}, {1:5d}, {2:5d}, {3: 20.13E}, {4: 20.13E}, {5: 20.13E}'
         .format(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx))
     values_msg = msg
     for value in design_point:
-        values_msg = ('{0}, {1}'.format(values_msg, value))
+        values_msg = ('{0}, {1: 20.13E}'.format(values_msg, value))
     print(values_msg)
     with open(settings.opt_file, 'a') as opt_file:
         print(values_msg, file = opt_file)
 
     grad_msg = msg
     for grad in gradient:
-        grad_msg = ('{0}, {1}'.format(grad_msg, grad))
+        grad_msg = ('{0}, {1: 20.13E}'.format(grad_msg, grad))
     with open(settings.grad_file, 'a') as grad_file:
         print(grad_msg, file = grad_file)
