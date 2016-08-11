@@ -1,4 +1,4 @@
-import myjson
+from myjson import myjson
 from collections import OrderedDict
 import numpy
 import os
@@ -8,6 +8,8 @@ import time
 import multiprocessing
 
 numpy.set_printoptions(precision = 14)
+
+zero = 1.0e-20
 
 
 class objective_model(object):
@@ -221,6 +223,7 @@ class settings(object):
         self.default_alpha = 0.0
         self.stop_delta = 0.0
         self.nsearch = 8
+        self.line_search_type = 'quadratic'
         
         self.nconstraints = 0
         self.constrainttype = []
@@ -232,13 +235,14 @@ class settings(object):
 
     def load(settings_file):
         self = settings()
-        input = myjson.load(settings_file)
+        input = myjson(settings_file)
             
         # Read settings from JSON file
         json_settings = input.get('settings', OrderedDict)
         self.default_alpha = json_settings.get('default_alpha', float)
         self.stop_delta = json_settings.get('stop_delta', float)
         self.nsearch = json_settings.get('n_search', int)
+        self.line_search_type = json_settings.get('line_search_type', str, 'quadratic')
         self.verbose = json_settings.get('verbose', bool, False)  # optional
         
         # Read variables
@@ -371,6 +375,13 @@ def optimize(obj_model, settings):
     
     
 def line_search(design_point, obj_value, s, obj_model, settings):
+    if settings.line_search_type == 'quadratic':
+        return line_search_quad(design_point, obj_value, s, obj_model, settings)
+    else:
+        return line_search_lin(design_point, obj_value, s, obj_model, settings)
+    
+    
+def line_search_lin(design_point, obj_value, s, obj_model, settings):
     if settings.verbose:
         print('line search ----------------------------------------------------------------------------')
 
@@ -421,6 +432,92 @@ def line_search(design_point, obj_value, s, obj_model, settings):
 #TODO:    self.constraints()
     if settings.verbose: print('Final alpha = {0}'.format(alpha))
     return alpha, design_point
+
+
+def line_search_quad(design_point, obj_value, s, obj_model, settings):
+    """Perform a quadratic line search to minimize the objective function
+    
+    This subroutine evaluates the objective function multiple times in the
+    direction of s and fits a parabola to the results using a least-squares
+    algorithm to identify the minimum value for the objective function in
+    the current direction.
+    
+    Inputs
+    ------
+    design_point = A list of design variables defining the design point at
+                   which to begin the line search
+ 
+    obj_value = The value of the objective function at the specified design
+                point.
+                
+    s = The direction matrix defining the direction in which to conduct the
+        line search.
+    
+    obj_model = The objective model object
+    
+    settings = The optimization settings object
+    
+    Outputs
+    -------
+    alpha_min = The alpha corresponding to the minimum value of the objective
+                function in the current direction
+                
+    design_point = The design point corresponding to the minimum value of the
+                   objective function in the current direction
+    """
+    if settings.verbose:
+        print('Performing quadratic line search...')
+
+    # Determine the initial step size to use in the direction of s
+    s_norm = numpy.linalg.norm(s)
+    alpha = max(settings.default_alpha, 1.1 * settings.stop_delta / s_norm)
+    alpha_mult = settings.nsearch / 2.0
+    
+    # Compute the objective function multiple times in the direction of s
+    alphas, obj_vals = run_mult_cases(settings.nsearch, alpha, s, design_point, obj_value, obj_model)
+    if settings.verbose:
+        for i in range(settings.nsearch + 1):
+            print('{0}, {1}, {2}'.format(i, alphas[i], obj_vals[i]))
+    
+    # Fit the data points to a parabola
+    alphas_sq = [a**2 for a in alphas]
+    A = numpy.vstack([alphas_sq, alphas, numpy.ones(len(alphas))]).T
+    a, b, c = numpy.linalg.lstsq(A, obj_vals)[0]
+    
+    # Find the minimum of the parabola
+    # Make sure alpha_min is a minimum (a > 0) and is positive (b < 0)
+    if a > zero and b < zero:
+        alpha_min = -0.5 * b / a
+
+    else:
+        # Parabolic curve fit did not work, find the minimum data point
+        ind = obj_vals.index(min(obj_vals))
+        
+        # If minimum is at beginning or end of line search, use that data point
+        if ind < 1 or ind > settings.nsearch - 2:
+            alpha_min = alphas[ind]
+
+        # If minimum and two closest neighbors form a concave-up parabola,
+        # fit the parabola and find its minimum. 
+        elif alphas[ind - 1] > alphas[ind] or alphas[ind + 1] > alphas[ind]:
+            alphas = alphas[ind - 1 : ind + 2]
+            alphas_sq = alphas_sq[ind - 1 : ind + 2]
+            obj_vals = obj_vals[ind - 1 : ind + 2]
+            A = numpy.vstack([alphas_sq, alphas, numpy.ones(len(alphas))]).T
+            a, b, c = numpy.linalg.lstsq(A, obj_vals)[0]
+            # Already enforced constraints on parabolic curve fit, so use the minimum.
+            alpha_min = -0.5 * b / a
+        # Can't fit a parabola through the data, so just use the minimum point
+        else:
+            alpha_min = alphas[ind]
+    
+    # Update design point based on alpha that minimized objective function
+    for i in range(len(design_point)):
+        design_point[i] += alpha_min * s[i]
+
+#TODO:    self.constraints()
+    if settings.verbose: print('Line search minimized at alpha = {0}'.format(alpha_min))
+    return alpha_min, design_point
 
 
 def run_mult_cases(nevals, alpha, s, dp0, obj_fcn0, obj_model):
