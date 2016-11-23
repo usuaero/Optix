@@ -37,7 +37,7 @@ class myjson:
             except KeyError as exc:
                 if default_value is None:
                     print('Error: required JSON path not found. Operation aborted.')
-                    print('       Missing path is ""'.format(abs_path))
+                    print('       Missing path is "{0}"'.format(abs_path))
                     raise
                 else:
                     json_data = default_value
