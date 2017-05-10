@@ -217,13 +217,14 @@ class settings(object):
         
         self.nvars = 0
         self.varnames = []
-        self.vars = []
-        self.grad = []
+        self.varsinit = []
+        self.opton = []
         
         self.default_alpha = 0.0
         self.stop_delta = 0.0
         self.nsearch = 8
         self.line_search_type = 'quadratic'
+        self.alpha_tolerance = 0.01
         
         self.nconstraints = 0
         self.constrainttype = []
@@ -247,14 +248,14 @@ class settings(object):
         
         # Read variables
         json_variables = input.get('variables', OrderedDict)
-        self.nvars = len(json_variables.data)
+        self.nvars = 0
         self.varnames = []
         self.varsinit = []
         self.opton = []
         for var_name in json_variables.data:
-            self.varnames.append(var_name)
-            self.varsinit.append(json_variables.get(var_name +'.init', float))
-            self.opton.append(json_variables.get(var_name + '.opt', str) == 'on')
+            self.add_variable(var_name,
+                              json_variables.get(var_name +'.init', float),
+                              json_variables.get(var_name + '.opt', str) == 'on')
         
         # Read constraints
         json_constraints = input.get('constraints', OrderedDict, OrderedDict())
@@ -282,6 +283,13 @@ class settings(object):
             self.penalty_factor.append(json_constraint_data.get('factor', float))
             
         return self
+
+
+    def add_variable(self, varname, varinit, opton = True):
+        self.varnames.append(varname)
+        self.varsinit.append(varinit)
+        self.opton.append(opton)
+        self.nvars += 1
 
 
 def optimize(obj_model, settings):
@@ -334,9 +342,8 @@ def optimize(obj_model, settings):
             
             # Initialize N to the identity matrix
             if (i_iter == 0):
-                N = numpy.zeros((settings.nvars, settings.nvars))  # n x n
-                for i in range(settings.nvars):
-                    N[i, i] = 1.0
+                N = numpy.eye(settings.nvars)  # n x n
+
             else:
                 dx = numpy.matrix(design_point - design_point_prev)  # 1 x n
                 gamma = numpy.matrix(gradient - gradient_prev)  # 1 x n
@@ -369,7 +376,7 @@ def optimize(obj_model, settings):
             settings.penalty[i] = settings.penalty[i] * settings.penalty_factor[i]
     
     # Run the final case
-    obj_value = obj_model.obj_fcn((design_point, 0))
+    obj_value = obj_model.obj_fcn((design_point, -1))
     append_file(iter, o_iter, i_iter, obj_value, 0.0, mag_dx, design_point, gradient, settings)
     return (obj_value, design_point)
     
@@ -394,7 +401,7 @@ def line_search_lin(design_point, obj_value, s, obj_model, settings):
         xval, yval = run_mult_cases(settings.nsearch, alpha, s, design_point, obj_value, obj_model)
         if settings.verbose:
             for i in range(settings.nsearch + 1):
-                print('{0}, {1}, {2}'.format(i, xval[i], yval[i]))
+                print('{0:5d}, {1:15.7E}, {2:15.7E}'.format(i, xval[i], yval[i]))
         
         mincoord = yval.index(min(yval))
         if yval[1] > yval[0]:
@@ -456,7 +463,7 @@ def line_search_quad(design_point, obj_value, s, obj_model, settings):
     obj_model = The objective model object
     
     settings = The optimization settings object
-    
+
     Outputs
     -------
     alpha_min = The alpha corresponding to the minimum value of the objective
@@ -472,48 +479,71 @@ def line_search_quad(design_point, obj_value, s, obj_model, settings):
     s_norm = numpy.linalg.norm(s)
     alpha = max(settings.default_alpha, 1.1 * settings.stop_delta / s_norm)
     alpha_mult = settings.nsearch / 2.0
-    
-    # Compute the objective function multiple times in the direction of s
-    alphas, obj_vals = run_mult_cases(settings.nsearch, alpha, s, design_point, obj_value, obj_model)
-    if settings.verbose:
-        for i in range(settings.nsearch + 1):
-            print('{0}, {1}, {2}'.format(i, alphas[i], obj_vals[i]))
-    
-    # Fit the data points to a parabola
-    alphas_sq = [a**2 for a in alphas]
-    A = numpy.vstack([alphas_sq, alphas, numpy.ones(len(alphas))]).T
-    a, b, c = numpy.linalg.lstsq(A, obj_vals)[0]
-    
-    # Find the minimum of the parabola
-    # Make sure alpha_min is a minimum (a > 0) and is positive (b < 0)
-    if a > zero and b < zero:
-        alpha_min = -0.5 * b / a
 
-    else:
-        # Parabolic curve fit did not work, find the minimum data point
+    found_min = False
+    line_search_min = (0.0, obj_value)
+    alpha_history = []
+    while not found_min:
+        # Compute the objective function multiple times in the direction of s
+        alphas, obj_vals = run_mult_cases(settings.nsearch, alpha, s, design_point, obj_value, obj_model)
+        alpha_history.append(alpha)
+
+        # Save the minimum data point for later comparisons
         ind = obj_vals.index(min(obj_vals))
-        
-        # If minimum is at beginning or end of line search, use that data point
-        if ind < 1 or ind > settings.nsearch - 2:
-            alpha_min = alphas[ind]
+        if obj_vals[ind] < line_search_min[1]:
+            line_search_min = (alphas[ind], obj_vals[ind])
 
-        # If minimum and two closest neighbors form a concave-up parabola,
-        # fit the parabola and find its minimum. 
-        elif alphas[ind - 1] > alphas[ind] or alphas[ind + 1] > alphas[ind]:
-            alphas = alphas[ind - 1 : ind + 2]
-            alphas_sq = alphas_sq[ind - 1 : ind + 2]
-            obj_vals = obj_vals[ind - 1 : ind + 2]
-            A = numpy.vstack([alphas_sq, alphas, numpy.ones(len(alphas))]).T
-            a, b, c = numpy.linalg.lstsq(A, obj_vals)[0]
-            # Already enforced constraints on parabolic curve fit, so use the minimum.
-            alpha_min = -0.5 * b / a
-        # Can't fit a parabola through the data, so just use the minimum point
+        if settings.verbose:
+            for i in range(settings.nsearch + 1):
+                print('{0:5d}, {1:15.7E}, {2:15.7E}'.format(i, alphas[i], obj_vals[i]))
+    
+        # Fit the data points to a parabola
+        alphas_sq = [a**2 for a in alphas]
+        A = numpy.vstack([alphas_sq, alphas, numpy.ones(len(alphas))]).T
+        a, b, c = numpy.linalg.lstsq(A, obj_vals)[0]
+    
+        # Find the minimum of the parabola
+        # Make sure alpha_min is a minimum (a > 0) and is positive (b < 0)
+        if a > zero and b < zero:
+            alpha_min = (-0.5 * b / a)
+
         else:
-            alpha_min = alphas[ind]
+            # Parabolic curve fit did not work
+            # If minimum is at beginning or end of line search, use that data point
+            if ind == 0 or ind == len(obj_vals) - 1:
+                alpha_min = alphas[ind]
+
+            # If minimum and two closest neighbors form a concave-up parabola,
+            # fit the parabola and find its minimum. 
+            elif alphas[ind - 1] > alphas[ind] or alphas[ind + 1] > alphas[ind]:
+                alphas = alphas[ind - 1 : ind + 2]
+                alphas_sq = alphas_sq[ind - 1 : ind + 2]
+                obj_vals = obj_vals[ind - 1 : ind + 2]
+                A = numpy.vstack([alphas_sq, alphas, numpy.ones(len(alphas))]).T
+                a, b, c = numpy.linalg.lstsq(A, obj_vals)[0]
+                # Already enforced constraints on parabolic curve fit, so use the minimum.
+                alpha_min = -0.5 * b / a
+
+            # Can't fit a parabola through the data, so just use the minimum point
+            else:
+                alpha_min = alphas[ind]
+
+        # Set alpha for next iteration
+        if alpha_min == 0.0:
+            found_min = True
+        else:
+            alpha = alpha_min / 2
+            for a in alpha_history:
+                pct_change = abs(alpha - a) / max(alpha, a, settings.alpha_tolerance)
+                if pct_change < settings.alpha_tolerance:
+                    # Already tried this alpha, so we're going in a circle.
+                    # Return the minimum found so we can update the direction.
+                    alpha_min = line_search_min[0]
+                    found_min = True
+                
     
     # Update design point based on alpha that minimized objective function
-    for i in range(len(design_point)):
-        design_point[i] += alpha_min * s[i]
+    design_point[:] += alpha_min * s[:]
 
 #TODO:    self.constraints()
     if settings.verbose: print('Line search minimized at alpha = {0}'.format(alpha_min))
