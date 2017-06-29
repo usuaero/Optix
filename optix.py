@@ -1,13 +1,13 @@
 from myjson import myjson
 from collections import OrderedDict
-import numpy
+import numpy as np
 import os
 import shutil
 import time
 
 import multiprocessing
 
-numpy.set_printoptions(precision = 14)
+np.set_printoptions(precision = 14)
 
 zero = 1.0e-20
 
@@ -221,10 +221,16 @@ class settings(object):
         self.opton = []
         
         self.default_alpha = 0.0
-        self.stop_delta = 0.0
+        self.stop_delta = 1.0E-12
         self.nsearch = 8
         self.line_search_type = 'quadratic'
-        self.alpha_tolerance = 0.01
+        self.alpha_tol = 0.1
+        self.max_refinements = 100
+        self.rsq_tol = 0.99
+        self.max_alpha_factor = 100
+
+        self.wolfe_armijo = 1.0e-4
+        self.wolfe_curv = 0.9
         
         self.nconstraints = 0
         self.constrainttype = []
@@ -286,10 +292,16 @@ class settings(object):
 
 
     def add_variable(self, varname, varinit, opton = True):
-        self.varnames.append(varname)
-        self.varsinit.append(varinit)
-        self.opton.append(opton)
-        self.nvars += 1
+        if varname in self.varnames:
+            i = self.varnames.index(varname)
+            self.varsinit[i] = varinit
+            self.opton[i] = opton
+        else:
+            i = len(self.varnames)
+            self.varnames.append(varname)
+            self.varsinit.append(varinit)
+            self.opton.append(opton)
+            self.nvars += 1
 
 
 def optimize(obj_model, settings):
@@ -325,7 +337,7 @@ def optimize(obj_model, settings):
     mag_dx = 1.0
     design_point = settings.varsinit[:]
     while mag_dx > settings.stop_delta:
-        design_point_init = numpy.copy(design_point)
+        design_point_init = np.copy(design_point)
         i_iter = 0
         
         print('Constraint Penalties')
@@ -342,25 +354,35 @@ def optimize(obj_model, settings):
             
             # Initialize N to the identity matrix
             if (i_iter == 0):
-                N = numpy.eye(settings.nvars)  # n x n
+                N = np.eye(settings.nvars)  # n x n
 
             else:
-                dx = numpy.matrix(design_point - design_point_prev)  # 1 x n
-                gamma = numpy.matrix(gradient - gradient_prev)  # 1 x n
-                NG = N * numpy.transpose(gamma)  # n x 1
-                denom = dx * numpy.transpose(gamma)  # 1 x 1
-                N += ((1.0 + numpy.dot(gamma, NG) / denom)[0,0] * (numpy.transpose(dx) * dx) / denom
-                      - ((numpy.transpose(dx) * (gamma * N)) + (NG * dx)) / denom
+                dx = np.matrix(design_point - design_point_prev)  # 1 x n
+                gamma = np.matrix(gradient - gradient_prev)  # 1 x n
+                NG = N * np.transpose(gamma)  # n x 1
+                denom = dx * np.transpose(gamma)  # 1 x 1
+                N += ((1.0 + np.dot(gamma, NG) / denom)[0,0] * (np.transpose(dx) * dx) / denom
+                      - ((np.transpose(dx) * (gamma * N)) + (NG * dx)) / denom
                      )
+
+                # Calculate the second Wolfe condition for the previous
+                # iteration. The curvature condition ensures that the slope is
+                # sufficiently large to contribute to a reduction in the
+                # objective function. If this condition is not met, the inner
+                # loop is stopped and the direction matrix is reset to the
+                # direction of steepest descent.
+                if np.dot(s, gradient) < settings.wolfe_curv * np.dot(s, gradient_prev):
+                    print("Wolfe condition (ii): curvature condition not satisified!")
+                    break
                 
-            s = -numpy.dot(N, gradient)
-            design_point_prev = numpy.copy(design_point)
-            gradient_prev = numpy.copy(gradient)
+            s = -np.dot(N, gradient)
+            design_point_prev = np.copy(design_point)
+            gradient_prev = np.copy(gradient)
             
-            alpha, design_point = line_search(design_point[:], obj_value, s, obj_model, settings)
+            alpha, design_point = line_search(design_point[:], obj_value, gradient, s, obj_model, settings)
             
             dx = design_point - design_point_prev
-            mag_dx = numpy.linalg.norm(dx)
+            mag_dx = np.linalg.norm(dx)
             i_iter += 1
             iter += 1
             
@@ -368,7 +390,7 @@ def optimize(obj_model, settings):
 #TODO:        self.write_optix_file(save_file_name)
         
         dx = design_point - design_point_init
-        mag_dx = numpy.linalg.norm(dx)
+        mag_dx = np.linalg.norm(dx)
         append_file(iter, o_iter, i_iter, obj_value, alpha, mag_dx, design_point, gradient, settings)
         
         o_iter += 1
@@ -381,9 +403,9 @@ def optimize(obj_model, settings):
     return (obj_value, design_point)
     
     
-def line_search(design_point, obj_value, s, obj_model, settings):
+def line_search(design_point, obj_value, gradient, s, obj_model, settings):
     if settings.line_search_type == 'quadratic':
-        return line_search_quad(design_point, obj_value, s, obj_model, settings)
+        return line_search_quad(design_point, obj_value, gradient, s, obj_model, settings)
     else:
         return line_search_lin(design_point, obj_value, s, obj_model, settings)
     
@@ -392,7 +414,7 @@ def line_search_lin(design_point, obj_value, s, obj_model, settings):
     if settings.verbose:
         print('line search ----------------------------------------------------------------------------')
 
-    s_norm = numpy.linalg.norm(s)
+    s_norm = np.linalg.norm(s)
     alpha = max(settings.default_alpha, 1.1 * settings.stop_delta / s_norm)
     alpha_mult = settings.nsearch / 2.0
     
@@ -441,7 +463,7 @@ def line_search_lin(design_point, obj_value, s, obj_model, settings):
     return alpha, design_point
 
 
-def line_search_quad(design_point, obj_value, s, obj_model, settings):
+def line_search_quad(design_point, obj_value, gradient, s, obj_model, settings):
     """Perform a quadratic line search to minimize the objective function
     
     This subroutine evaluates the objective function multiple times in the
@@ -456,6 +478,9 @@ def line_search_quad(design_point, obj_value, s, obj_model, settings):
  
     obj_value = The value of the objective function at the specified design
                 point.
+
+    gradient = The gradient of the objective function at the specified design
+               point.
                 
     s = The direction matrix defining the direction in which to conduct the
         line search.
@@ -476,74 +501,85 @@ def line_search_quad(design_point, obj_value, s, obj_model, settings):
         print('Performing quadratic line search...')
 
     # Determine the initial step size to use in the direction of s
-    s_norm = numpy.linalg.norm(s)
-    alpha = max(settings.default_alpha, 1.1 * settings.stop_delta / s_norm)
-    alpha_mult = settings.nsearch / 2.0
+    stop_delta = settings.stop_delta / np.linalg.norm(s)
+    alpha = max(settings.default_alpha, 1.1 * stop_delta)
 
     found_min = False
     line_search_min = (0.0, obj_value)
     alpha_history = []
-    while not found_min:
+
+    # Determine the maximum number of adjustments in alpha to attempt.
+    nadjust = int(np.ceil(-np.log10(stop_delta) /
+        np.log10(np.ceil(settings.nsearch / 2))))
+
+    for i in range(nadjust):
         # Compute the objective function multiple times in the direction of s
-        alphas, obj_vals = run_mult_cases(settings.nsearch, alpha, s, design_point, obj_value, obj_model)
+        alphas, obj_vals = run_mult_cases(settings.nsearch, alpha, s,
+                design_point, obj_value, obj_model)
         alpha_history.append(alpha)
 
         # Save the minimum data point for later comparisons
         ind = obj_vals.index(min(obj_vals))
         if obj_vals[ind] < line_search_min[1]:
             line_search_min = (alphas[ind], obj_vals[ind])
+        alpha_min_est = line_search_min[0]
 
         if settings.verbose:
-            for i in range(settings.nsearch + 1):
-                print('{0:5d}, {1:15.7E}, {2:15.7E}'.format(i, alphas[i], obj_vals[i]))
+            for j in range(settings.nsearch + 1):
+                print('{:5d}, {:23.15E}, {:23.15E}'.format(
+                    j, alphas[j], obj_vals[j]))
+            
+        # Check for invalid results
+        if np.isnan(obj_vals).any():
+            break
+            
+        # Check stopping criteria
+        if alpha <= stop_delta and ind < settings.nsearch - 1:
+            break
+            
+        # Fit a quadratic through the data and find the resulting minimum
+        q = quadratic(np.asarray(alphas), np.asarray(obj_vals))
+        (alpha_min_est, obj_value_est) = q.vertex()
+        
+        if (alpha_min_est is None or alpha_min_est < 0 or not q.convex() or
+                q.rsq < settings.rsq_tol):
+            # Can't find a better minimum by curve fitting all data points.
+            # Try a quadratic through minimum and two closest neighbors.
+            left = min(max(ind - 1, 0), len(alphas) - 3)
+            right = left + 3
+            q = quadratic(np.asarray(alphas[left:right]), np.asarray(obj_vals[left:right]))
+            (alpha_min_est, obj_value_est) = q.vertex()
+            
+            if (alpha_min_est is None or alpha_min_est < 0 or not q.convex()):
+                # Can't find a better minimum by curve fitting.
+                # Just use the current minimum.
+                if ind > 0:
+                    break
+                else:
+                    # Reduce alpha and try again
+                    alpha_min_est = alpha / 2
     
-        # Fit the data points to a parabola
-        alphas_sq = [a**2 for a in alphas]
-        A = numpy.vstack([alphas_sq, alphas, numpy.ones(len(alphas))]).T
-        a, b, c = numpy.linalg.lstsq(A, obj_vals)[0]
-    
-        # Find the minimum of the parabola
-        # Make sure alpha_min is a minimum (a > 0) and is positive (b < 0)
-        if a > zero and b < zero:
-            alpha_min = (-0.5 * b / a)
-
-        else:
-            # Parabolic curve fit did not work
-            # If minimum is at beginning or end of line search, use that data point
-            if ind == 0 or ind == len(obj_vals) - 1:
-                alpha_min = alphas[ind]
-
-            # If minimum and two closest neighbors form a concave-up parabola,
-            # fit the parabola and find its minimum. 
-            elif alphas[ind - 1] > alphas[ind] or alphas[ind + 1] > alphas[ind]:
-                alphas = alphas[ind - 1 : ind + 2]
-                alphas_sq = alphas_sq[ind - 1 : ind + 2]
-                obj_vals = obj_vals[ind - 1 : ind + 2]
-                A = numpy.vstack([alphas_sq, alphas, numpy.ones(len(alphas))]).T
-                a, b, c = numpy.linalg.lstsq(A, obj_vals)[0]
-                # Already enforced constraints on parabolic curve fit, so use the minimum.
-                alpha_min = -0.5 * b / a
-
-            # Can't fit a parabola through the data, so just use the minimum point
-            else:
-                alpha_min = alphas[ind]
-
         # Set alpha for next iteration
-        if alpha_min == 0.0:
-            found_min = True
-        else:
-            alpha = alpha_min / 2
-            for a in alpha_history:
-                pct_change = abs(alpha - a) / max(alpha, a, settings.alpha_tolerance)
-                if pct_change < settings.alpha_tolerance:
-                    # Already tried this alpha, so we're going in a circle.
-                    # Return the minimum found so we can update the direction.
-                    alpha_min = line_search_min[0]
-                    found_min = True
-                
+        alpha = max(alpha / settings.max_alpha_factor, min(alpha * settings.max_alpha_factor,
+                alpha_min_est / np.ceil(settings.nsearch / 2.0)))
+        
+        # Check to see if we've already tried close to this alpha
+        alpha_close = min(alpha_history, key=lambda a: abs(a - alpha) / alpha)
+        delta = abs(alpha_close - alpha) / alpha
+        
+        if delta <= settings.alpha_tol:
+            break
     
     # Update design point based on alpha that minimized objective function
+    alpha_min = line_search_min[0]
     design_point[:] += alpha_min * s[:]
+
+    # Calculate the first Wolfe condition. This is a measure of how much the
+    # step length (alpha) decreases the objective function, but has no effect
+    # on the behavior of the quadratic line search.
+    armijo = obj_value + settings.wolfe_armijo * alpha_min * np.dot(s, gradient)
+    if line_search_min[1] > armijo:
+        print("Wolfe condition (i): Armijo rule not satisfied.")
 
 #TODO:    self.constraints()
     if settings.verbose: print('Line search minimized at alpha = {0}'.format(alpha_min))
@@ -580,3 +616,66 @@ def append_file(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx, design_point
         grad_msg = ('{0}, {1: 20.13E}'.format(grad_msg, grad))
     with open(settings.grad_file, 'a') as grad_file:
         print(grad_msg, file = grad_file)
+
+
+class quadratic(object):
+    """Class for fitting, evaluating, and interrogating quadratic functions
+
+    This class is used for fitting a quadratic function to a data set
+    evaluating the function at specific points, and determining the
+    characteristics of the function.
+    """
+    def __init__(self, x, y):
+        """
+        Construct a quadratic object from tabulated data.
+        Quadratic is of the form f(x) = ax^2 + bx + c
+
+        Inputs
+        ------
+        x = List of independent values
+        y = List of dependent values
+        """
+        super().__init__()
+
+        # Calculate the quadratic coefficients
+        x_sq = [xx**2 for xx in x]
+        A = np.vstack([x_sq, x, np.ones(len(x))]).T
+        self.a, self.b, self.c = np.linalg.lstsq(A, y)[0]
+        
+        # Calculate the coefficient of determination
+        f = [self.f(xx) for xx in x]
+        ssres = ((f - y)**2).sum()
+        sstot = ((y - y.mean())**2).sum()
+        self.rsq = 1 - ssres / sstot
+
+
+    def convex(self):
+        """
+        Test to see if the quadratic is convex (opens up).
+        """
+        # Convex has positive curvature (2nd derivative)
+        # f"(x) = 2a, so a > 0 corresponds to convex
+        return (self.a > 0)
+
+
+    def vertex(self):
+        """
+        Find the coordinates of the vertex
+        """
+        if self.a != 0.0:
+            # Find x where f'(x) = 2ax + b = 0
+            x = -0.5 * self.b / self.a
+            return (x, self.f(x))
+        else:
+            # Quadratic is actually a line, no minimum!
+            return (None, None)
+
+
+    def f(self, x):
+        """
+        Evaluate the quadratic function at x
+        """
+        if x is not None: return self.a * x**2 + self.b * x + self.c
+        else: return None
+
+
