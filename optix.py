@@ -252,6 +252,14 @@ class settings(object):
         self.line_search_type = json_settings.get('line_search_type', str, 'quadratic')
         self.verbose = json_settings.get('verbose', bool, False)  # optional
         
+        self.alpha_tol = json_settings.get('alpha_tol', float, self.alpha_tol)
+        self.max_refinements = json_settings.get('max_refinements', int, self.max_refinements)
+        self.rsq_tol = json_settings.get('rsq_tol', float, self.rsq_tol)
+        self.max_alpha_factor = json_settings.get('max_alpha_factor', int, self.max_alpha_factor)
+
+        self.wolfe_armijo = json_settings.get('wolfe_armijo', float, self.wolfe_armijo)
+        self.wolfe_curv = json_settings.get('wolfe_curvature', float, self.wolfe_curv)
+        
         # Read variables
         json_variables = input.get('variables', OrderedDict)
         self.nvars = 0
@@ -531,10 +539,17 @@ def line_search_quad(design_point, obj_value, gradient, s, obj_model, settings):
             
         # Check for invalid results
         if np.isnan(obj_vals).any():
+            print('Found NaN')
+            break
+
+        # Check for plateau
+        if min(obj_vals) == max(obj_vals):
+            print('Objective function has plateaued')
             break
             
         # Check stopping criteria
         if alpha <= stop_delta and ind < settings.nsearch - 1:
+            print('stopping criteria met')
             break
             
         # Fit a quadratic through the data and find the resulting minimum
@@ -551,22 +566,25 @@ def line_search_quad(design_point, obj_value, gradient, s, obj_model, settings):
             (alpha_min_est, obj_value_est) = q.vertex()
             
             if (alpha_min_est is None or alpha_min_est < 0 or not q.convex()):
-                # Can't find a better minimum by curve fitting.
-                # Just use the current minimum.
-                if ind > 0:
-                    break
-                else:
-                    # Reduce alpha and try again
+                if ind == settings.nsearch:
+                    # If minimum is at the end, try increasing alpha
+                    alpha_min_est = alpha * 4
+                elif ind == 0:
+                    # If minimum is at beginning, try reducing alpha
                     alpha_min_est = alpha / 2
+                else:
+                    # Can't find a better minimum by curve fitting,
+                    # so just use the current minimum.
+                    break
     
         # Set alpha for next iteration
         alpha = max(alpha / settings.max_alpha_factor, min(alpha * settings.max_alpha_factor,
                 alpha_min_est / np.ceil(settings.nsearch / 2.0)))
+        print('alpha for next iteration = ', alpha)
         
         # Check to see if we've already tried close to this alpha
         alpha_close = min(alpha_history, key=lambda a: abs(a - alpha) / alpha)
         delta = abs(alpha_close - alpha) / alpha
-        
         if delta <= settings.alpha_tol:
             break
     
@@ -646,7 +664,12 @@ class quadratic(object):
         f = [self.f(xx) for xx in x]
         ssres = ((f - y)**2).sum()
         sstot = ((y - y.mean())**2).sum()
-        self.rsq = 1 - ssres / sstot
+
+        if abs(sstot) < zero:
+            # Data points actually formed a horizontal line
+            self.rsq = 0.0
+        else:
+            self.rsq = 1 - ssres / sstot
 
 
     def convex(self):
