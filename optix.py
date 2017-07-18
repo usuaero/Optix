@@ -1,3 +1,4 @@
+import json
 from myjson import myjson
 from collections import OrderedDict
 import numpy as np
@@ -261,7 +262,7 @@ class settings(object):
         self.wolfe_curv = json_settings.get('wolfe_curvature', float, self.wolfe_curv)
         
         # Read variables
-        json_variables = input.get('variables', OrderedDict)
+        json_variables = input.get('variables', OrderedDict, OrderedDict())
         self.nvars = 0
         self.varnames = []
         self.varsinit = []
@@ -299,13 +300,39 @@ class settings(object):
         return self
 
 
+    def write(self, settings_file):
+        data = OrderedDict()
+        data['settings'] = OrderedDict()
+        data['settings']['default_alpha'] = self.default_alpha
+        data['settings']['stop_delta'] = self.stop_delta
+        data['settings']['n_search'] = self.nsearch
+        data['settings']['line_search_type'] = self.line_search_type
+        data['settings']['verbose'] = self.verbose
+
+        data['settings']['alpha_tol'] = self.alpha_tol
+        data['settings']['max_refinements'] = self.max_refinements
+        data['settings']['rsq_tol'] = self.rsq_tol
+        data['settings']['max_alpha_factor'] = self.max_alpha_factor
+
+        data['settings']['wolfe_armijo'] = self.wolfe_armijo
+        data['settings']['wolfe_curvature'] = self.wolfe_curv
+
+        data['variables'] = OrderedDict()
+        for i in range(self.nvars):
+            data['variables'][self.varnames[i]] = OrderedDict()
+            data['variables'][self.varnames[i]]['init'] = self.varsinit[i]
+            data['variables'][self.varnames[i]]['opt'] = self.opton[i]
+
+        with open(settings_file, 'w') as settings:
+            json.dump(data, settings, indent = 4)
+
+
     def add_variable(self, varname, varinit, opton = True):
         if varname in self.varnames:
             i = self.varnames.index(varname)
             self.varsinit[i] = varinit
             self.opton[i] = opton
         else:
-            i = len(self.varnames)
             self.varnames.append(varname)
             self.varsinit.append(varinit)
             self.opton.append(opton)
