@@ -340,7 +340,7 @@ class settings(object):
 
 
 def optimize(obj_model, settings):
-    """
+    """Minimize the objective model based on the settings provided
     """
     header = ('{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'
         .format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)'))
@@ -372,6 +372,7 @@ def optimize(obj_model, settings):
     mag_dx = 1.0
     design_point = settings.varsinit[:]
     while mag_dx > settings.stop_delta:
+        # Outer iteration
         design_point_init = np.copy(design_point)
         i_iter = 0
         
@@ -384,6 +385,7 @@ def optimize(obj_model, settings):
         
         alpha = 0.0
         while mag_dx > settings.stop_delta:
+            # Inner iteration
             obj_value, gradient = obj_model.evaluate_gradient(design_point)
             append_file(iter, o_iter, i_iter, obj_value, alpha, mag_dx, design_point, gradient, settings)
             
@@ -392,6 +394,7 @@ def optimize(obj_model, settings):
                 N = np.eye(settings.nvars)  # n x n
 
             else:
+                # Update the direction matrix
                 dx = np.matrix(design_point - design_point_prev)  # 1 x n
                 gamma = np.matrix(gradient - gradient_prev)  # 1 x n
                 NG = N * np.transpose(gamma)  # n x 1
@@ -439,6 +442,7 @@ def optimize(obj_model, settings):
     
     
 def line_search(design_point, obj_value, gradient, s, obj_model, settings):
+    """Single method which will call the line search or quadratic line search as needed"""
     if settings.line_search_type == 'quadratic':
         return line_search_quad(design_point, obj_value, gradient, s, obj_model, settings)
     else:
@@ -446,6 +450,36 @@ def line_search(design_point, obj_value, gradient, s, obj_model, settings):
     
     
 def line_search_lin(design_point, obj_value, s, obj_model, settings):
+    """Perform line search to find the value of alpha corresponding to a minimum in the objective function.
+
+    This subroutine evaluates the objective function multiple times in the
+    direction of s. It then selects the minimum point and the two bracketing
+    points and fits a parabola to these to find the vertex. The step length
+    is adjusted if no bracketted minimum can be found.
+
+    Inputs
+    ------
+    design_point = A list of design variables defining the design point at
+                   which to begin the line search
+ 
+    obj_value = The value of the objective function at the specified design
+                point.
+
+    s = The direction matrix defining the direction in which to conduct the
+        line search.
+    
+    obj_model = The objective model object
+    
+    settings = The optimization settings object
+
+    Outputs
+    -------
+    alpha_min = The alpha corresponding to the minimum value of the objective
+                function in the current direction
+                
+    design_point = The design point corresponding to the minimum value of the
+                   objective function in the current direction
+    """
     if settings.verbose:
         print('line search ----------------------------------------------------------------------------')
 
@@ -475,7 +509,9 @@ def line_search_lin(design_point, obj_value, s, obj_model, settings):
             if settings.verbose: print('mincoord = {0}'.format(mincoord))
             if mincoord == 0: return alpha, design_point
             elif mincoord < settings.nsearch: found_min = True
-            else: alpha *= alpha_mult
+            else:
+                if settings.verbose: print('Too small of a step. Increasing alpha')
+                alpha *= alpha_mult
     
     a1 = xval[mincoord - 1]
     a2 = xval[mincoord]
@@ -607,7 +643,7 @@ def line_search_quad(design_point, obj_value, gradient, s, obj_model, settings):
         # Set alpha for next iteration
         alpha = max(alpha / settings.max_alpha_factor, min(alpha * settings.max_alpha_factor,
                 alpha_min_est / np.ceil(settings.nsearch / 2.0)))
-        print('alpha for next iteration = ', alpha)
+        print('alpha for next iteration = {0}'.format(alpha))
         
         # Check to see if we've already tried close to this alpha
         alpha_close = min(alpha_history, key=lambda a: abs(a - alpha) / alpha)
@@ -629,7 +665,6 @@ def line_search_quad(design_point, obj_value, gradient, s, obj_model, settings):
 #TODO:    self.constraints()
     if settings.verbose: print('Line search minimized at alpha = {0}'.format(alpha_min))
     return alpha_min, design_point
-
 
 def run_mult_cases(nevals, alpha, s, dp0, obj_fcn0, obj_model):
     # Calculate linearly distributed alphas for the line search
