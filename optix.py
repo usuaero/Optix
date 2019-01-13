@@ -12,7 +12,6 @@ np.set_printoptions(precision = 14)
 
 zero = 1.0e-20
 
-
 class objective_model(object):
     """Defines the evaluation model of an objective function
     
