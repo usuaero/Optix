@@ -1,0 +1,8 @@
+Should s, the search direction vector, be normalized?
+Why do we check to see if the second point in the line search is larger than the first? This doesn't seem to be anything special...
+Where does the formula for the optimum alpha in the simple line search come from?
+There could be a lot done to make the line search and quadratic line search similar from a code structure perspective.
+Why does the quadratic line search determine a maximum number of adjustments to alpha to attempt?
+
+Possible improvements
+Within line searches, call alpha "step_size", until the actual alpha is found.
