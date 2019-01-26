@@ -9,20 +9,19 @@ def grad(args):
     f = args[0]
     x = args[1]
     dx = args[2]
-    fargs = args[3]
-    central = args[4]
-    max_processes = args[5]
+    central = args[3]
+    max_processes = args[4]
     n = len(x)
 
     if central:
-        argslist = [(x,fargs) for i in range(2*n)]
+        argslist = [x for i in range(2*n)]
         for i in range(n):
-            argslist[2*i][0][i] -= dx
-            argslist[2*i+1][0][i] += dx
+            argslist[2*i][i] -= dx
+            argslist[2*i+1][i] += dx
     else:
-        argslist = [(x,*fargs) for  i in range(n+1)]
+        argslist = [x for  i in range(n+1)]
         for i in range(n):
-            argslist[i][0][i] += dx
+            argslist[i][i] += dx
 
     with multiprocessing.Pool(processes=max_processes) as pool:
         results = pool.map(f,argslist)
@@ -34,8 +33,38 @@ def grad(args):
     else:
         for i in range(n):
             gradient[i] = (results[i]-results[-1])/dx
-
     return gradient
+
+class Settings:
+    """Contains settings used by optimizer"""
+
+    def __init__(self,**kwargs):
+        self.args = kwargs.get("args",())
+        self.method = kwargs.get("method")
+        self.termination_tol = kwargs.get("termination_tol",1e-12)
+        self.verbose = kwargs.get("verbose",False)
+        self.central_diff = kwargs.get("central_diff",True)
+        self.file_tag = kwargs.get("file_tag","")
+        self.max_processes = kwargs.get("max_processes",1)
+        self.dx = kwargs.get("dx",0.001)
+        self.alpha_d = kwargs.get("default_alpha",1)
+        self.search_type = kwargs.get("line_search","bracket")
+        self.n_search = kwargs.get("n_search",8)
+
+        self.use_finite_diff = grad == None
+
+        bounds = kwargs.get("bounds")
+        constraints = kwargs.get("constraints")
+
+        if self.method == None:
+            if (bounds != None or constraints != None):
+                self.method = "sqp"
+            else:
+                self.method = "bgfs"
+
+        #Check for issues
+        if self.method == "bgfs" and (bounds != None or constraints != None):
+            raise ValueError("Bounds or constraints may not be specified for the simple BGFS algorithm.")
 
 class OptimizerResult:
 
@@ -47,32 +76,44 @@ class OptimizerResult:
 class Constraint:
     """Class defining a constraint"""
     
-    def __init(self,cstr_type,fun,**kwargs):
+    def __init(self,cstr_type,f,settings,**kwargs):
         self.type = cstr_type
-        self.g = fun
-
-        self.del_g = kwargs.get("grad")
-        self.central_diff = kwargs.get("central_diff",True)
-        self.max_processes = kwargs.get("max_processes",1)
-        self.dx = kwargs.get("dx",0.001)
+        self.fun = f
+        self.gr = kwargs.get("grad")
+        self.central_diff = settings.central_diff
+        self.max_processes = settings.max_processes
+        self.dx = settings.dx
         
-        if self.del_g == None:
-            self.del_g = lambda x: grad((self.g,x,self.dx,(),self.central_diff,self.max_processes))
+    def g(self,x):
+        return self.fun(x,*self.args)
+
+    def del_g(self,x):
+        if self.gr == None:
+            return grad((self.fun,x,self.dx,self.central_diff,self.max_processes))
+        else:
+            return self.gr(x)
 
 class Objective:
     """Class defining objective function"""
 
-    def __init__(self,f,**kwargs):
+    def __init__(self,f,settings,**kwargs):
         self.args = kwargs.get("args",())
-        self.f = lambda x: f(x,*self.args)
-        self.del_f = kwargs.get("grad")
+        self.fun = f
+        self.gr = kwargs.get("grad")
         self.hess = kwargs.get("hess")
-        self.central_diff = kwargs.get("central_diff",True)
-        self.max_processes = kwargs.get("max_processes",1)
-        self.dx = kwargs.get("dx",0.001)
+        self.central_diff = settings.central_diff
+        self.max_processes = settings.max_processes
+        self.dx = settings.dx
 
-        if self.del_f == None:
-            self.del_f = lambda x: grad((self.f,x,self.dx,(),self.central_diff,self.max_processes))
+    def f(self,x):
+        return self.fun(x,*self.args)
+
+    def del_f(self,x):
+        if self.gr == None:
+            return grad((self.fun,x,self.dx,self.central_diff,self.max_processes))
+        else:
+            return self.gr(x)
+
 
 class quadratic(object):
     """Class for fitting, evaluating, and interrogating quadratic functions

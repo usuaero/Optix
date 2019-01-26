@@ -19,7 +19,7 @@ def grad(func,x0,dx):
     return del_f
 
 stopping_delta = 1e-16
-dx = 0.01
+dx = 0.001
 delta_x = stopping_delta+1
 iter = 0
 n_vars = 2

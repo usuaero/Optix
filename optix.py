@@ -1,416 +1,233 @@
-import json
-from myjson import myjson
 from collections import OrderedDict
 import numpy as np
 import os
 import shutil
 import time
-
 import multiprocessing
+import classes as c
 
 np.set_printoptions(precision = 14)
 
 zero = 1.0e-20
 
-class objective_model(object):
-    """Defines the evaluation model of an objective function
-    
-    This class defines a model consisting of an objective function that can be
-    evaluated individually and with gradients. The class allows this function
-    to be executed at multiple design points, either synchronously or
-    asynchronously (using the Python multiprocessing module).
-    
-    Two methods for evaluating the function are used. The first method is
-    required and evaluates only the function itself, while the second method
-    is optional and evaluates the function and its gradient with respect to the
-    design variables. If the second function is not provided, a second-order
-    central differencing scheme is used to approximate gradients when needed.
+def minimize(fun,x0,**kwargs):
+    """Minimize a scalar function in one or more variables
+
+        Inputs:
+
+        fun(callable)
+        - Objective to be minimized. Must be a scalar function:
+        def fun(x,*args):
+            return float
+        where x is a vector of the design variables and *args is all
+        other parameters necessary for calling the function.
+
+        x0(array-like,shape(n,))
+        - A starting guess for the independent variables. May be
+        a list or numpy array. All variables must be represented as
+        minimize determines the number of variables from the length
+        of this vector.
+
+        args(tuple,optional)
+        - Arguments to be passed to the objective function.
+
+        method(str,optional)
+        - Method to be used by minimize to find the minimum of the
+        objective function. May be one of the following:
+            Unconstrained problem:
+                "bgfs" - quasi-Nexton with BGFS Hessian update
+            Constrained problem:
+                "sqp" - sequential quadratic programming
+                "grg" - generalized reduced gradient
+        If no method is specified, minimize will choose either "bgfs"
+        or "sqp", based on whether constraints were given.
+
+        grad(callable,optional)
+        - Returns the gradient of the objective function at a specified
+        point. Definition is the same as fun() but must return array-like,
+        shape(n,). If not specified, will be estimated using a finite-
+        difference approximation.
+
+        hess(callable,optional)
+        - Returns the Hessian of of the objective function at a specified
+        point. Definition is the same as fun() but must return array-like,
+        shape(n,n). If not specified, will be estimated using a finite-
+        difference approximation.
+        NOTE: bgfs, sqp, and grg do not require direct Hessian evaluations,
+        so this functionality is not defined at this time.
+
+        bounds(sequence of tuple,optional)
+        - Bounds on independent variables. Can only be used with constrained
+        methods. Should be a sequence of (min,max) pairs for each element in
+        x. Use -numpy.inf or numpy.inf to specify mo bound.
+
+        constraints(list of {Constraint,dict}, optional)
+        - Constraints on the design space. Can only be used with constrained
+        methods. Given as a list of dictionaries, each having the following
+        keys:
+            type (str)
+                Constraint type; either 'eq' for equality or 'ineq' for
+                inequality; equality means the constraint function must
+                equate to 0 and inequality means the constraint function
+                must be negative.
+            fun (callable)
+                Value of the constraint function. Must return a scalar. May 
+                only have one argument, being an array of the design variables.
+            grad (callable)
+                Returns the gradient of the constraint function at a
+                specified point. Must return array-like, shape(n,). May
+                only have one argument, being an array of the design variables.
+
+        termination_tol(float,optional)
+        - Point at which the optimization will quit. Execution terminates
+        if the change in x for any step becomes less than the termination
+        tolerance. Defaults to 1e-12.
+
+        verbose(bool,optional)
+        - If set to true, extra information about each step of the
+        optimization will be printed to the command line.
+
+        cent_diff(bool,optional)
+        - Flag for setting finite-difference approximation method. If set
+        to false, a forward-difference approximation will be used. Otherwise
+        defaults to a central-difference.
+
+        file_tag(str,optional)
+        - Tag to be appended to the output filenames. If not specified,
+        output files will be overwritten each time minimize() is called.
+        Output files may still be overwritten if file_tag does not change
+        with each call.
+
+        max_processes(int,optional)
+        - Maximum number of processes to be used in multiprocessing. Defaults
+        to 1.
+
+        dx(float,optional)
+        - Step size to be used in finite difference methods. Defaults to 0.001
+
+        default_alpha(float,optional)
+        - Initial step size to be used in the line search. Defaults to 1.
+
+        line_search(string,optional)
+        - Specifies which type of line search should be conducted in the search
+        direction. The following types are possible:
+            "bracket" - backets minimum and finds vertex of parabola formed by
+            3 minimum points
+            "quadratic" - fits a quadratic to the search points and finds vertex
+        Defaults to bracket.
+
+        n_search(int,optional)
+        -Number of points to be considered in the search direction. Defaults to
+        8.
+
+    Output
+
+        Optimum(OptimizerResult)
+        - Object containing information about the result of the optimization.
+        Attributes include:
+            x(array-like,shape(n,))
+                Point in the design space where the optimization ended.
+            success(bool)
+                Indicates whether the optimizer exitted normally.
+            message(str)
+                Message about how the optimizer exitted.
+
     """
-    def __init__(self,
-                 objective_fcn,
-                 objective_fcn_with_gradient = None,
-                 max_processes = 1,
-                 dx = 0.01
-                ):
-        """Constructor
-        
-        Constructor for the objective_model class
-        
-        Inputs
-        ------
-        objective_fcn:
-            The function to evaluate through this model. The function should
-            accept two arguments. The first argument is a list of design
-            variable values specifying a fixed design point. The second
-            argument is the case number assigned to the evaluation. The
-            function should return a single result that is the value of the
-            objective function at the specified design point.
 
-        objective_fcn_with_gradient:
-            The function to evaluate through this model when gradients are
-            requested. The function should accept the same two arguments as
-            objective_fcn. The function should return two results: the value
-            of the objective function at the specified design point and the
-            gradient of the objective function at the specified design point.
-            Note that the first return value should be equal to the
-            objective_fcn return value for a given design point.
-            
-            If objective_fcn_with_gradient is not specified (default), a
-            second-order central difference approximation will be used with
-            objective_fcn when gradients are needed.
-            
-        max_processes:
-            The maximum number of simultaneous processes to use. If set to 1
-            (default), all function evaluations will be executed sequentially.
-            Otherwise, the Python multiprocessing module will be used to
-            execute multiple function evaluations simultaneously.
-            
-        dx:
-            The perturbation size to use if the second-order central difference
-            approximation is used to estimate the gradient of the function. If
-            objective_fcn_with_gradient is specified, dx is not used.
-        """
-        # Set the objective function
-        self.obj_fcn = objective_fcn
-        
-        # Set the gradient function
-        if objective_fcn_with_gradient is not None:
-            # Use the user-specified function to calculate gradients
-            self.obj_fcn_with_gradient = objective_fcn_with_gradient
-        else:
-            # Use central differencing scheme to approximate the gradient
-            self.obj_fcn_with_gradient = self.central_difference
-            self.dx = dx
-            
-        # Set the maximum number of simultaneous processes
-        self.max_processes = max_processes
-        
-        # Initialize the number of function/gradient evaluations
-        self.n_fcn_evals = 0
-        self.n_grad_evals = 0
+    #Initialize settings
+    settings = c.Settings(**kwargs)
 
-        
-    def evaluate(self, design_points):
-        """Evaluate the function at multiple design points
-        
-        This routine evaluates the objective function at multiple design
-        points, each specified by a list of design variables.
-        
-        Inputs
-        ------
-        design_points = A list of design points. A design point is defined by
-                        a list of design variables that are passed into the
-                        objective function for a single evaluation. Therefore,
-                        design_points is a list of lists.
-               
-        Outputs
-        -------
-        objective = A list of results from the objective function,
-                    corresponding to the value of the objective function at
-                    each design point specified.
-        
-        """
-        objective = []
-        if self.max_processes > 1:
-            # Execute function at multiple design points in parallel
-            with multiprocessing.Pool(processes = self.max_processes) as pool:
-                args = [(design_points[i], i + 1) for i in range(len(design_points))]
-                objective = pool.map(self.obj_fcn, args)
-        else:
-            # Execute function at each design point sequentially
-            for i in range(len(design_points)):
-                objective.append(self.obj_fcn((design_points[i], i + 1)))
+    #Initialize objective function
+    grad = kwargs.get("grad")
+    hess = kwargs.get("hess")
+    f = c.Objective(fun,settings,grad=grad,hess=hess)
 
-        # Increment the number of function evaluations
-        self.n_fcn_evals += len(design_points)
-        
-        return objective
+    #Initialize design variables
+    n_vars = len(x0)
+    x_start = np.reshape(x0,(n_vars,1))
 
-        
-    def evaluate_gradient(self, design_point):
-        """Evaluate the function and its gradient at a specified design point
-        
-        This routine evaluates the objective function and its gradient at a
-        single design point.
-        
-        Inputs
-        ------
-        design_point = The design point at which to evaluate the function and
-                       its gradient. The design point is defined as a list of
-                       values, one value for each design variable required by
-                       the objective function.
-                       
-        Outputs
-        -------
-        objective = The value of the objective function at the specified design
-                    point.
-                    
-        gradient = The gradient of the objective function at the specified
-                   design point.
-        """
-        objective, gradient = self.obj_fcn_with_gradient((design_point, 0))
-        self.n_fcn_evals += 1
-        self.n_grad_evals += 1
+    #Initialize constraints
+    constraints = kwargs.get("constraints")
+    if constraints != None:
+        n_cstr = len(constraints)
+        n_ineq_cstr = 0
+        g = []
+        for constraint in constraints:
+            if constraint["type"] == "ineq":
+                n_ineq_cstr += 1
+                grad = constraint.get("grad")
+                g.append(c.Constraint(constraint["type"],constraint["fun"],settings,grad=grad))
+        for constraint in constraints:
+            if constraint["type"] == "eq":
+                grad = constraint.get("grad")
+                g.append(c.Constraint(constraint["type"],constraint["fun"],settings,grad=grad))
+        g = np.reshape((n_cstr,1))
+    else:
+        g = None
+        n_cstr = 0
+        n_ineq_cstr = 0
 
-        return objective, gradient
-    
-    
-    def central_difference(self, args):
-        """Approximate the gradient of a function using central differencing
-        
-        This routine approximates the gradient of a specified function with respect
-        to all design variables at a specified design point. The gradient is
-        approximated using second-order central differencing.
-        
-        Inputs
-        ------
-        design_point = A list of design variables defining the design point at
-                       which the objective function and its gradient will be
-                       evaluated
-                       
-        case_id = The case ID to use for the objective function evaluation. The
-                  case IDs for gradient evaluations will be incremented
-                  sequentially starting from (case_id + 1).
-        """
-        design_point = args[0]
-        case_id = args[1]
-        # Initialize a list of objective function arguments by perturbing each
-        # variable by +/-dx
-        n_design_vars = len(design_point)
-        argslist = [(design_point[:], i) for i in range(case_id, case_id + 2 * n_design_vars + 1)]
-        for i in range(1, n_design_vars + 1):
-            argslist[i][0][i - 1] += self.dx
-            argslist[i + n_design_vars][0][i - 1] -= self.dx
-        
-        if self.max_processes > 1:
-            # Execute function at multiple design points in parallel
-            with multiprocessing.Pool(processes = self.max_processes) as pool:
-                results = pool.map(self.obj_fcn, argslist)
-        else:
-            # Execute function at each design point sequentially
-            results = []
-            for a in argslist:
-                results.append(self.obj_fcn(a))
-                
-        # Get the objective function value at the specified design point
-        objective = results[0]
-        
-        # Calculate the gradient of the objective function from results
-        # at the perturbed design points
-        gradient = []
-        for i in range(1, n_design_vars + 1):
-            gradient.append((results[i] - results[i + n_design_vars]) / (2.0 * self.dx))
+    bounds = kwargs.get("bounds")
 
-        return objective, gradient
-
-        
-class settings(object):
-    """Defines the various settings used by the optimization algorithm
-    
-    
-    
-    """
-    def __init__(self):
-        self.opt_file = 'optimization.txt'
-        self.grad_file = 'gradient.txt'
-        self.verbose = False
-        
-        self.nvars = 0
-        self.varnames = []
-        self.varsinit = []
-        self.opton = []
-        
-        self.default_alpha = 0.0
-        self.stop_delta = 1.0E-12
-        self.nsearch = 8
-        self.line_search_type = 'quadratic'
-        self.alpha_tol = 0.1
-        self.max_refinements = 100
-        self.rsq_tol = 0.99
-        self.max_alpha_factor = 100
-
-        self.wolfe_armijo = 1.0e-4
-        self.wolfe_curv = 0.9
-        
-        self.nconstraints = 0
-        self.constrainttype = []
-        self.constraintnames = []
-        self.constraintvalues = []
-        self.penalty = []
-        self.penalty_factor = []
-
-
-    def load(settings_file):
-        self = settings()
-        input = myjson(settings_file)
-            
-        # Read settings from JSON file
-        json_settings = input.get('settings', OrderedDict)
-        self.default_alpha = json_settings.get('default_alpha', float)
-        self.stop_delta = json_settings.get('stop_delta', float)
-        self.nsearch = json_settings.get('n_search', int)
-        self.line_search_type = json_settings.get('line_search_type', str, 'quadratic')
-        self.verbose = json_settings.get('verbose', bool, False)  # optional
-        
-        self.alpha_tol = json_settings.get('alpha_tol', float, self.alpha_tol)
-        self.max_refinements = json_settings.get('max_refinements', int, self.max_refinements)
-        self.rsq_tol = json_settings.get('rsq_tol', float, self.rsq_tol)
-        self.max_alpha_factor = json_settings.get('max_alpha_factor', int, self.max_alpha_factor)
-
-        self.wolfe_armijo = json_settings.get('wolfe_armijo', float, self.wolfe_armijo)
-        self.wolfe_curv = json_settings.get('wolfe_curvature', float, self.wolfe_curv)
-        
-        # Read variables
-        json_variables = input.get('variables', OrderedDict, OrderedDict())
-        self.nvars = 0
-        self.varnames = []
-        self.varsinit = []
-        self.opton = []
-        for var_name in json_variables.data:
-            self.add_variable(var_name,
-                              json_variables.get(var_name +'.init', float),
-                              json_variables.get(var_name + '.opt', str) == 'on')
-        
-        # Read constraints
-        json_constraints = input.get('constraints', OrderedDict, OrderedDict())
-        self.nconstraints = len(json_constraints.data)
-        self.nconstraints = 0
-        self.contrainttype = []
-        self.constraintnames = []
-        self.constraintvalues = []
-        self.penalty = []
-        self.penalty_factor = []
-        valid_constraint_types = ['=', '<', '>']
-        for const_name in json_constraints.data:
-            json_constraint_data = json_constraints.get(const_name, OrderedDict)
-            const_type = json_constraint_data.get('type', str)
-            if const_type not in valid_constraint_types:
-                print('Unknown constraint type: {0}. Constraint {1} skipped.'
-                    .format(const_type, const_name))
-                print('Valid constraint types are {0}.'.format(valid_constraint_types))
-                continue
-            
-            self.constrainttype.append(const_type)
-            self.constraintnames.append(const_name)
-            self.constraintvalues.append(json_constraint_data.get('value', float))
-            self.penalty.append(json_constraint_data.get('penalty', float))
-            self.penalty_factor.append(json_constraint_data.get('factor', float))
-            
-        return self
-
-
-    def write(self, settings_file):
-        data = OrderedDict()
-        data['settings'] = OrderedDict()
-        data['settings']['default_alpha'] = self.default_alpha
-        data['settings']['stop_delta'] = self.stop_delta
-        data['settings']['n_search'] = self.nsearch
-        data['settings']['line_search_type'] = self.line_search_type
-        data['settings']['verbose'] = self.verbose
-
-        data['settings']['alpha_tol'] = self.alpha_tol
-        data['settings']['max_refinements'] = self.max_refinements
-        data['settings']['rsq_tol'] = self.rsq_tol
-        data['settings']['max_alpha_factor'] = self.max_alpha_factor
-
-        data['settings']['wolfe_armijo'] = self.wolfe_armijo
-        data['settings']['wolfe_curvature'] = self.wolfe_curv
-
-        data['variables'] = OrderedDict()
-        for i in range(self.nvars):
-            data['variables'][self.varnames[i]] = OrderedDict()
-            data['variables'][self.varnames[i]]['init'] = self.varsinit[i]
-            data['variables'][self.varnames[i]]['opt'] = self.opton[i]
-
-        with open(settings_file, 'w') as settings:
-            json.dump(data, settings, indent = 4)
-
-
-    def add_variable(self, varname, varinit, opton = True):
-        if varname in self.varnames:
-            i = self.varnames.index(varname)
-            self.varsinit[i] = varinit
-            self.opton[i] = opton
-        else:
-            self.varnames.append(varname)
-            self.varsinit.append(varinit)
-            self.opton.append(opton)
-            self.nvars += 1
-
-
-def optimize(obj_model, settings):
-    """Minimize the objective model based on the settings provided
-    """
+    #Begin formatting of output files
     header = ('{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'
         .format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)'))
-    for name in settings.varnames: header += ', {0:>20}'.format(name)
-    with open(settings.opt_file, 'w') as opt_file:
+    for i in range(n_vars):
+        header += ', {0:>20}'.format('x'+str(i))
+
+    opt_filename = "optimize"+settings.file_tag+".txt"
+    settings.opt_file = opt_filename
+    with open(opt_filename, 'w') as opt_file:
         opt_file.write(header + '\n')
     
-    with open(settings.grad_file, 'w') as grad_file:
+    grad_filename = "gradient"+settings.file_tag+".txt"
+    settings.grad_file = grad_filename
+    with open(grad_filename, 'w') as grad_file:
         grad_file.write(header + '\n')
-    
-    print('---------- Variables ----------')
-    for i in range(settings.nvars):
-        print('{0} = {1}'.format(settings.varnames[i], settings.varsinit[i]))
-    print('')
-    
-    print('---------- Constraints ----------')
-    for i in range(settings.nconstraints):
-        print('{0}, {1}, {2}'.format(settings.constraintnames[i],
-            settings.constrainttype[i], settings.constraintvalues[i]))
-    print('')    
-    
-    print('---------- Settings ----------')
-    print('      default alpha: {0}'.format(settings.default_alpha))
-    print('     stopping delta: {0}'.format(settings.stop_delta))
-    print('')
+
+    #Print setup information to command line
+    printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings)
     
     iter = 0
     o_iter = 0
     mag_dx = 1.0
-    design_point = settings.varsinit[:]
-    while mag_dx > settings.stop_delta:
-        # Outer iteration
-        design_point_init = np.copy(design_point)
-        i_iter = 0
-        
-        print('Constraint Penalties')
-        for i in range(settings.nconstraints):
-            print('{0} {1}'.format(settings.constraintnames[i], settings.penalty[i]))
-            
+    x0 = np.copy(x_start)
+    while mag_dx > settings.termination_tol:
+        # Outer iteration; resets Hessian to identity matrix for BGFS update
         print('Beginning new update matrix')
         print(header)
-        
-        alpha = 0.0
-        while mag_dx > settings.stop_delta:
+        i_iter = 0
+        alpha = settings.alpha_d
+
+        f0 = f.f(x0)
+        print(f0)
+        del_f0 = f.del_f(x0)
+        N = np.eye(n_vars)
+
+        append_file(iter, o_iter, i_iter, f0, alpha, mag_dx, x0, del_f0, settings)
+        while mag_dx > settings.termination_tol:
             # Inner iteration
-            obj_value, gradient = obj_model.evaluate_gradient(design_point)
+            i_iter += 1
             append_file(iter, o_iter, i_iter, obj_value, alpha, mag_dx, design_point, gradient, settings)
-            
-            # Initialize N to the identity matrix
-            if (i_iter == 0):
-                N = np.eye(settings.nvars)  # n x n
 
-            else:
-                # Update the direction matrix
-                dx = np.matrix(design_point - design_point_prev)  # 1 x n
-                gamma = np.matrix(gradient - gradient_prev)  # 1 x n
-                NG = N * np.transpose(gamma)  # n x 1
-                denom = dx * np.transpose(gamma)  # 1 x 1
-                N += ((1.0 + np.dot(gamma, NG) / denom)[0,0] * (np.transpose(dx) * dx) / denom
-                      - ((np.transpose(dx) * (gamma * N)) + (NG * dx)) / denom
-                     )
+            # Update the direction matrix
+            dx = np.matrix(design_point - design_point_prev)  # 1 x n
+            gamma = np.matrix(gradient - gradient_prev)  # 1 x n
+            NG = N * np.transpose(gamma)  # n x 1
+            denom = dx * np.transpose(gamma)  # 1 x 1
+            N += ((1.0 + np.dot(gamma, NG) / denom)[0,0] * (np.transpose(dx) * dx) / denom
+                  - ((np.transpose(dx) * (gamma * N)) + (NG * dx)) / denom
+                 )
 
-                # Calculate the second Wolfe condition for the previous
-                # iteration. The curvature condition ensures that the slope is
-                # sufficiently large to contribute to a reduction in the
-                # objective function. If this condition is not met, the inner
-                # loop is stopped and the direction matrix is reset to the
-                # direction of steepest descent.
-                if np.dot(s, gradient) < settings.wolfe_curv * np.dot(s, gradient_prev):
-                    print("Wolfe condition (ii): curvature condition not satisified!")
-                    break
+            # Calculate the second Wolfe condition for the previous
+            # iteration. The curvature condition ensures that the slope is
+            # sufficiently large to contribute to a reduction in the
+            # objective function. If this condition is not met, the inner
+            # loop is stopped and the direction matrix is reset to the
+            # direction of steepest descent.
+            if np.dot(s, gradient) < settings.wolfe_curv * np.dot(s, gradient_prev):
+                print("Wolfe condition (ii): curvature condition not satisified!")
+                break
                 
             s = -np.dot(N, gradient)
             design_point_prev = np.copy(design_point)
@@ -427,10 +244,6 @@ def optimize(obj_model, settings):
 #TODO:        self.write_optix_file(save_file_name)
         
         dx = design_point - design_point_init
-        mag_dx = np.linalg.norm(dx)
-        append_file(iter, o_iter, i_iter, obj_value, alpha, mag_dx, design_point, gradient, settings)
-        
-        o_iter += 1
         for i in range(settings.nconstraints):
             settings.penalty[i] = settings.penalty[i] * settings.penalty_factor[i]
     
@@ -762,4 +575,35 @@ class quadratic(object):
         if x is not None: return self.a * x**2 + self.b * x + self.c
         else: return None
 
+def printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings):
+    print("\nOptix.py from USU AeroLab\n")
+    
+    print('---------- Variables ----------')
+    print("Optimizing in {0} variables.".format(n_vars))
+    print("Initial guess:\n{0}".format(x_start))
+    if bounds != None:
+        print("Variable bounds:\n{0}".format(bounds))
+    print("")
+    
+    print('---------- Constraints ----------')
+    print('{0} total constraints'.format(n_cstr))
+    print('{0} inequality constraints'.format(n_ineq_cstr))
+    print('{0} equality constraints'.format(n_cstr-n_ineq_cstr))
+    print("")
+
+    print('---------- Settings ----------')
+    print('            method: {0}'.format(settings.method))
+    print('     obj func args: {0}'.format(settings.args))
+    print('     default alpha: {0}'.format(settings.alpha_d))
+    print('    stopping delta: {0}'.format(settings.termination_tol))
+    print('     max processes: {0}'.format(settings.max_processes))
+    print(' dx (finite diffs): {0}'.format(settings.dx))
+    print('          file tag: {0}'.format(settings.file_tag))
+    print('           verbose: {0}'.format(settings.verbose))
+    if settings.use_finite_diff:
+        if settings.central_diff:
+            print('using central difference approximation')
+        else:
+            print('using forward difference approximation')
+    print('')
 
