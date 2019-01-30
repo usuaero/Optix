@@ -3,27 +3,27 @@ import numpy as np
 import os
 import shutil
 import time
-import multiprocessing
+import multiprocessing as mp
 
-def grad(args):
-    f = args[0]
-    x = args[1]
-    dx = args[2]
-    central = args[3]
-    max_processes = args[4]
+def grad(f,x,dx,central,max_processes):
     n = len(x)
 
     if central:
-        argslist = [x for i in range(2*n)]
+        argslist = []
         for i in range(n):
-            argslist[2*i][i] -= dx
-            argslist[2*i+1][i] += dx
+            dx_v = np.zeros((n,1))
+            dx_v[i] = dx
+            argslist.append(x-dx_v)
+            argslist.append(x+dx_v)
     else:
-        argslist = [x for  i in range(n+1)]
+        argslist = []
         for i in range(n):
-            argslist[i][i] += dx
+            dx_v = np.zeros((n,1))
+            dx_v[i] = dx
+            argslist.append(x+dx_v)
+        argslist.append(x)
 
-    with multiprocessing.Pool(processes=max_processes) as pool:
+    with mp.Pool(processes=max_processes) as pool:
         results = pool.map(f,argslist)
 
     gradient = np.zeros((n,1))
@@ -50,6 +50,7 @@ class Settings:
         self.alpha_d = kwargs.get("default_alpha",1)
         self.search_type = kwargs.get("line_search","bracket")
         self.n_search = kwargs.get("n_search",8)
+        self.max_iterations = kwargs.get("max_iterations",np.inf)
 
         self.use_finite_diff = grad == None
 
@@ -67,16 +68,22 @@ class Settings:
             raise ValueError("Bounds or constraints may not be specified for the simple BGFS algorithm.")
 
 class OptimizerResult:
+    obj_calls = 0
+    cstr_calls = []
 
-    def __init__(self,x,success,message):
+    def __init__(self,f,x,success,message,iterations):
+        self.f = f
         self.x = x
         self.success = success
         self.message = message
+        self.total_iter = iterations
 
 class Constraint:
     """Class defining a constraint"""
+    eval_calls = mp.Value('i',0)
     
     def __init(self,cstr_type,f,settings,**kwargs):
+        self.args = kwargs.get("args",())
         self.type = cstr_type
         self.fun = f
         self.gr = kwargs.get("grad")
@@ -85,19 +92,22 @@ class Constraint:
         self.dx = settings.dx
         
     def g(self,x):
+        with self.eval_calls.get_lock():
+            self.eval_calls.value += 1
         return self.fun(x,*self.args)
 
     def del_g(self,x):
         if self.gr == None:
-            return grad((self.fun,x,self.dx,self.central_diff,self.max_processes))
+            return grad(self.g,x,self.dx,self.central_diff,self.max_processes)
         else:
             return self.gr(x)
 
 class Objective:
     """Class defining objective function"""
+    eval_calls = mp.Value('i',0)
 
     def __init__(self,f,settings,**kwargs):
-        self.args = kwargs.get("args",())
+        self.args = settings.args
         self.fun = f
         self.gr = kwargs.get("grad")
         self.hess = kwargs.get("hess")
@@ -106,11 +116,13 @@ class Objective:
         self.dx = settings.dx
 
     def f(self,x):
-        return self.fun(x,*self.args)
+        with self.eval_calls.get_lock():
+            self.eval_calls.value += 1
+        return np.asscalar(self.fun(x,*self.args))
 
     def del_f(self,x):
         if self.gr == None:
-            return grad((self.fun,x,self.dx,self.central_diff,self.max_processes))
+            return grad(self.f,x,self.dx,self.central_diff,self.max_processes)
         else:
             return self.gr(x)
 
