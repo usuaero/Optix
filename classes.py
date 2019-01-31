@@ -51,6 +51,8 @@ class Settings:
         self.search_type = kwargs.get("line_search","bracket")
         self.n_search = kwargs.get("n_search",8)
         self.max_iterations = kwargs.get("max_iterations",np.inf)
+        self.wolfe_armijo = kwargs.get("wolfe_armijo",1e-4)
+        self.wolfe_curv = kwargs.get("wolfe_curv",0.9)
 
         self.use_finite_diff = grad == None
 
@@ -82,7 +84,7 @@ class Constraint:
     """Class defining a constraint"""
     eval_calls = mp.Value('i',0)
     
-    def __init(self,cstr_type,f,settings,**kwargs):
+    def __init__(self,cstr_type,f,settings,**kwargs):
         self.args = kwargs.get("args",())
         self.type = cstr_type
         self.fun = f

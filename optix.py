@@ -70,11 +70,11 @@ def minimize(fun,x0,**kwargs):
                 Constraint type; either 'eq' for equality or 'ineq' for
                 inequality; equality means the constraint function must
                 equate to 0 and inequality means the constraint function
-                must be negative.
+                must be positive.
             fun (callable)
                 Value of the constraint function. Must return a scalar. May 
                 only have one argument, being an array of the design variables.
-            grad (callable)
+            grad (callable,optional)
                 Returns the gradient of the constraint function at a
                 specified point. Must return array-like, shape(n,). May
                 only have one argument, being an array of the design variables.
@@ -125,6 +125,12 @@ def minimize(fun,x0,**kwargs):
         -Maximum number of iterations for the optimization algorithm. Defaults to
         inf.
 
+        wolfe_armijo(float,optional)
+        -Value of c1 in the Wolfe conditions. Defaults to 1e-4.
+
+        wolfe_curv(float,optional)
+        -Value of c2 in the Wolfe conditions. Defaults to 0.9 for BGFS.
+
     Output
     ------
 
@@ -164,42 +170,56 @@ def minimize(fun,x0,**kwargs):
         n_cstr = len(constraints)
         n_ineq_cstr = 0
         g = []
+        # Inequality constraints are stored first
         for constraint in constraints:
             if constraint["type"] == "ineq":
                 n_ineq_cstr += 1
                 grad = constraint.get("grad")
-                g.append(c.Constraint(constraint["type"],constraint["fun"],settings,grad=grad))
+                constr = c.Constraint(constraint["type"],constraint["fun"],settings,grad=grad)
+                g.append(constr)
         for constraint in constraints:
             if constraint["type"] == "eq":
                 grad = constraint.get("grad")
-                g.append(c.Constraint(constraint["type"],constraint["fun"],settings,grad=grad))
-        g = np.reshape((n_cstr,1))
+                constr = c.Constraint(constraint["type"],constraint["fun"],settings,grad=grad)
+                g.append(constr)
+        g = np.array(g)
     else:
         g = None
         n_cstr = 0
         n_ineq_cstr = 0
 
+    settings.n_cstr = n_cstr
+    settings.n_ineq_cstr = n_ineq_cstr
     bounds = kwargs.get("bounds")
 
     #Begin formatting of output files
-    header = ('{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'
-        .format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)'))
+    opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
     for i in range(n_vars):
-        header += ', {0:>20}'.format('x'+str(i))
+        opt_header += ', {0:>20}'.format('x'+str(i))
+    for i in range(n_cstr):
+        opt_header += ', {0:>20}'.format('g'+str(i))
 
     opt_filename = "optimize"+settings.file_tag+".txt"
     settings.opt_file = opt_filename
     with open(opt_filename, 'w') as opt_file:
-        opt_file.write(header + '\n')
+        opt_file.write(opt_header + '\n')
+
+    grad_header = '{0:>84}  {1:>20}'.format(' ','df')
+    for i in range(n_cstr):
+        grad_header += (', {0:>'+str(21*n_vars)+'}').format('dg'+str(i))
+    grad_header += '\n{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
+    for j in range(n_cstr+1):
+        for i in range(n_vars):
+            grad_header += ', {0:>20}'.format('dx'+str(i))
     
     grad_filename = "gradient"+settings.file_tag+".txt"
     settings.grad_file = grad_filename
     with open(grad_filename, 'w') as grad_file:
-        grad_file.write(header + '\n')
+        grad_file.write(grad_header + '\n')
 
     #Print setup information to command line
     printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings)
-    print(header)
+    print(opt_header)
 
     # Drive to the minimum
     opt = find_minimum(f,g,x_start,settings)
@@ -244,7 +264,7 @@ def bgfs(f,x_start,settings):
         N0 = np.eye(n)
         s = -np.dot(N0,del_f0)
         s = s/np.linalg.norm(s)
-        x1,f1,alpha = line_search(x0,f0,s,f,settings)
+        x1,f1,alpha = line_search(x0,f0,s,del_f0,f,settings)
         delta_x0 = x1-x0
         mag_dx = np.linalg.norm(delta_x0)
 
@@ -252,10 +272,16 @@ def bgfs(f,x_start,settings):
             i_iter += 1
             iter += 1
 
-            # Update Hessian
+            # Update gradient and output file
             del_f1 = f.del_f(x1)
             append_file(iter,o_iter,i_iter,f1,alpha,mag_dx,x1,del_f1,settings)
 
+            # Check second Wolfe condition
+            if np.inner(s.T,del_f1.T) < settings.wolfe_curv*np.inner(s.T,del_f0.T):
+                print("Wolfe condition ii not satisfied.")
+                break
+
+            # Update Hessian
             gamma0 = del_f1-del_f0
             denom = np.matrix(delta_x0).T*np.matrix(gamma0)
             NG = np.matrix(N0)*np.matrix(gamma0)
@@ -267,7 +293,7 @@ def bgfs(f,x_start,settings):
             # Determine new search direction and perform line search
             s = -np.dot(N1,del_f1)
             s = s/np.linalg.norm(s)
-            x2,f2,alpha = line_search(x1,f1,s,f,settings)
+            x2,f2,alpha = line_search(x1,f1,s,del_f1,f,settings)
             delta_x1 = x2-x1
             mag_dx = np.linalg.norm(delta_x1)
 
@@ -285,7 +311,7 @@ def bgfs(f,x_start,settings):
     return c.OptimizerResult(f2,x2,True,"Optimizer exitted normally.",iter)
     
     
-def line_search(x0,f0,s,f,settings):
+def line_search(x0,f0,s,del_f0,f,settings):
     """Perform line search to find a minimum in the objective function.
 
     This subroutine evaluates the objective function multiple times in the
@@ -304,6 +330,9 @@ def line_search(x0,f0,s,f,settings):
 
         s(ndarray(n,))
         -Search direction.
+
+        del_f0(ndarray(n,))
+        -Gradient at x0
 
         f(Objective)
         -Objective function object.
@@ -378,6 +407,11 @@ def line_search(x0,f0,s,f,settings):
     if settings.verbose: print('Final alpha = {0}'.format(alpha_opt))
     x1 = x0+s*alpha_opt
     f1 = f.f(x1)
+
+    # Check first Wolfe condition (NOTE: does not affect execution)
+    armijo = f0+settings.wolfe_armijo*alpha_opt*np.inner(s.T,del_f0.T)
+    if f1 > armijo:
+        print("Wolve condition i not satisfied.")
     return x1,f1,alpha_opt
 
 
@@ -404,12 +438,186 @@ def find_opt_alpha(a,f_search,min_ind,settings):
     return alpha_opt
     
     
-def append_file(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx, design_point, gradient, settings):
-    msg = ('{0:4d}, {1:5d}, {2:5d}, {3: 20.13E}, {4: 20.13E}, {5: 20.13E}'
-        .format(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx))
+def sqp(f,g,x_start,settings):
+    """Performs Sequntial Quadratic Programming on a constrained optimization function."""
+    
+    # Initialization
+    iter = 0
+    o_iter = 0
+    n_vars = len(x_start)
+    n_cstr = settings.n_cstr
+    n_ineq_cstr = settings.n_ineq_cstr
+    
+    x0 = np.copy(x_start)
+    mag_dx = 1
+    while iter < settings.max_iterations and mag_dx > settings.termination_tol:
+        if settings.verbose: print("Setting Lagrangian Hessian to the identity matrix.")
+        o_iter += 1
+        i_iter = 1
+        iter += 1
+
+        # Create quadratic approximation
+        f0 = f.f(x0)
+        del_f0 = f.del_f(x0)
+        g0 = np.zeros((n_cstr,1))
+        del_g0 = np.zeros((n_vars,n_cstr))
+        for i in range(n_cstr):
+            g0[i] = g[i].g(x0)
+            del_g0[:,i] = g[i].del_g(x0).flatten()
+        del_2_L0 = np.identity(n_vars)
+        append_file(iter,o_iter,i_iter,f0,mag_dx,mag_dx,x0,del_f0,settings,g=g0,del_g=del_g0)
+            
+        # Create the system of equations to solve for delta_x and lambda
+        n_eqns = n_vars+n_cstr # At first assume all constraints are binding
+        A = np.zeros((n_eqns,n_eqns))
+        b = np.zeros((n_eqns,1))
+        for i in range(n_eqns):
+            for j in range(n_eqns):
+                if i<n_vars and j<n_vars:
+                    A[i][j] = del_2_L0[i][j]
+                elif i<n_vars:
+                    A[i][j] = -del_g0[i]
+                elif j<n_vars:
+                    A[i][j] = del_g0[j]
+                else:
+                    A[i][j] = 0
+            if i<n_vars:
+                b[i] = -del_f0[i]
+            else:
+                b[i] = -g0
+        
+        x_lambda = np.linalg.solve(A,b)
+        delta_x = x_lambda[0:n_vars]
+        l = x_lambda[n_vars:n_eqns]
+        
+        if l < 0: # Constraint is not binding
+            print("Constraint is not binding!")
+            A = np.zeros((n_vars,n_vars))
+            b = np.zeros((n_vars,1))
+            for i in range(n_vars):
+                for j in range(n_vars):
+                    A[i][j] = del_2_L0[i][j]
+                b[i] = -del_f0[i]
+            
+            delta_x = np.linalg.solve(A,b)
+            l = np.zeros((n_cstr,1))
+        
+        x1 = x0+delta_x
+        P1 = f.f(x1)
+        for i in range(n_cstr):
+            P1 += l[i]*abs(g[i].g(x1))
+        mag_dx = np.linalg.norm(delta_x)
+
+        while P1 > f0:
+            if settings.verbose: print("Stepped too far! Cutting step in half.")
+            delta_x /= 2
+            x2 = x1+delta_x
+            P2 = f.f(x2)
+            for i in range(n_cstr):
+                P2 += l[i]*abs(g[0][i](x2))
+        
+        while mag_dx > settings.termination_tol:
+            iter += 1
+            i_iter += 1
+        
+            # Create quadratic approximation
+            f1 = f.f(x1)
+            del_f1 = f.del_f(x1)
+            g1 = np.zeros((n_cstr,1))
+            del_g1 = np.zeros((n_vars,n_cstr))
+            for i in range(n_cstr):
+                g1[i] = g[i].g(x1)
+                del_g1[:,i] = g[i].del_g(x1).flatten()
+        
+            # Update the Lagrangian Hessain
+            del_L0 = del_f0-np.asscalar(l)*del_g0
+            del_L1 = del_f1-np.asscalar(l)*del_g1
+            gamma_0 = np.matrix(del_L1-del_L0)
+            first = gamma_0*gamma_0.T/(gamma_0.T*np.matrix(delta_x))
+            second = del_2_L0*(np.matrix(delta_x)*np.matrix(delta_x).T)*del_2_L0/(np.matrix(delta_x).T*del_2_L0*np.matrix(delta_x))
+            del_2_L1 = np.asarray(del_2_L0+first-second)
+
+            append_file(iter,o_iter,i_iter,f1,mag_dx,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
+        
+            # Create the system of equations to solve for delta_x and lambda
+            n_eqns = n_vars+n_cstr # At first assume all constraints are binding
+            A = np.zeros((n_eqns,n_eqns))
+            b = np.zeros((n_eqns,1))
+            for i in range(n_eqns):
+                for j in range(n_eqns):
+                    if i<n_vars and j<n_vars:
+                        A[i][j] = del_2_L1[i][j]
+                    elif i<n_vars:
+                        A[i][j] = -del_g1[i]
+                    elif j<n_vars:
+                        A[i][j] = del_g1[j]
+                    else:
+                        A[i][j] = 0
+                if i<n_vars:
+                    b[i] = -del_f1[i]
+                else:
+                    b[i] = -g1
+            
+            x_lambda = np.linalg.solve(A,b)
+            delta_x = x_lambda[0:n_vars]
+            l = x_lambda[n_vars:n_eqns]
+        
+            if l < 0: # Constraint is not binding
+                A = np.zeros((n_vars,n_vars))
+                b = np.zeros((n_vars,1))
+                for i in range(n_vars):
+                    for j in range(n_vars):
+                        A[i][j] = del_2_L1[i][j]
+                    b[i] = -del_f1[i]
+                
+                delta_x = np.linalg.solve(A,b)
+                l = np.zeros((n_cstr,1))
+            
+            x2 = x1+delta_x
+            P2 = f.f(x2)
+            for i in range(n_cstr):
+                P2 += l[i]*abs(g[i].g(x2))
+        
+            while P2 > P1:
+                if settings.verbose: print("Stepped too far! Cutting step in half.")
+                delta_x /= 2
+                x2 = x1+delta_x
+                P2 = f.f(x2)
+                for i in range(n_cstr):
+                    P2 += l[i]*abs(g[i].g(x2))
+        
+            x0 = x1
+            x1 = x2
+            f0 = f1
+            del_f0 = del_f1
+            g0 = g1
+            del_g0 = del_g1
+            del_2_L0 = del_2_L1
+            P1 = P2
+            mag_dx = np.linalg.norm(delta_x)
+    
+    f2 = f.f(x2)
+    del_f2 = f.del_f(x2)
+    g2 = np.zeros((n_cstr,1))
+    del_g2 = np.zeros((n_vars,n_cstr))
+    for i in range(n_cstr):
+        g2[i] = g[i].g(x2)
+        del_g2[:,i] = g[i].del_g(x2).flatten()
+    append_file(iter,o_iter,i_iter,f2,mag_dx,mag_dx,x2,del_f2,settings,g=g2,del_g=del_g2)
+    return c.OptimizerResult(f2,x2,True,"Optimizer exitted normally.",iter)
+
+
+def append_file(iter,o_iter,i_iter,obj_fcn_value,alpha,mag_dx,design_point,gradient,settings,**kwargs):
+    g = kwargs.get("g")
+    del_g = kwargs.get("del_g")
+
+    msg = '{0:4d}, {1:5d}, {2:5d}, {3: 20.13E}, {4: 20.13E}, {5: 20.13E}'.format(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx)
     values_msg = msg
     for value in design_point:
         values_msg = ('{0}, {1: 20.13E}'.format(values_msg, np.asscalar(value)))
+    if (g != None).any():
+        for cstr in g[0]:
+            values_msg = ('{0}, {1: 20.13E}'.format(values_msg, np.asscalar(cstr)))
     print(values_msg)
     with open(settings.opt_file, 'a') as opt_file:
         print(values_msg, file = opt_file)
@@ -417,6 +625,10 @@ def append_file(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx, design_point
     grad_msg = msg
     for grad in gradient:
         grad_msg = ('{0}, {1: 20.13E}'.format(grad_msg, np.asscalar(grad)))
+    if (del_g != None).any():
+        for i in range(settings.n_cstr):
+            for j in range(len(design_point)):
+                grad_msg = ('{0}, {1: 20.13E}'.format(grad_msg, np.asscalar(del_g[j,i])))
     with open(settings.grad_file, 'a') as grad_file:
         print(grad_msg, file = grad_file)
 
