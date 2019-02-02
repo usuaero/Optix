@@ -459,7 +459,7 @@ def sqp(f,g,x_start,settings):
         # Create quadratic approximation
         f0 = f.f(x0)
         del_f0 = f.del_f(x0)
-        g0 = np.zeros((n_cstr,1))
+        g0 = np.zeros(n_cstr)
         del_g0 = np.zeros((n_vars,n_cstr))
         for i in range(n_cstr):
             g0[i] = g[i].g(x0)
@@ -471,36 +471,34 @@ def sqp(f,g,x_start,settings):
         n_eqns = n_vars+n_cstr # At first assume all constraints are binding
         A = np.zeros((n_eqns,n_eqns))
         b = np.zeros((n_eqns,1))
-        for i in range(n_eqns):
-            for j in range(n_eqns):
-                if i<n_vars and j<n_vars:
-                    A[i][j] = del_2_L0[i][j]
-                elif i<n_vars:
-                    A[i][j] = -del_g0[i]
-                elif j<n_vars:
-                    A[i][j] = del_g0[j]
-                else:
-                    A[i][j] = 0
-            if i<n_vars:
-                b[i] = -del_f0[i]
-            else:
-                b[i] = -g0
-        
+        A[:n_vars,:n_vars] = del_2_L0
+        A[:n_vars,n_vars:] = -del_g0
+        A[n_vars:,:n_vars] = del_g0.T
+        b[:n_vars] = -del_f0
+        b[n_vars:] = np.reshape(-g0,(n_cstr,1))
+
         x_lambda = np.linalg.solve(A,b)
         delta_x = x_lambda[0:n_vars]
-        l = x_lambda[n_vars:n_eqns]
+        l = x_lambda[n_vars:]
         
-        if l < 0: # Constraint is not binding
-            print("Constraint is not binding!")
-            A = np.zeros((n_vars,n_vars))
-            b = np.zeros((n_vars,1))
-            for i in range(n_vars):
-                for j in range(n_vars):
-                    A[i][j] = del_2_L0[i][j]
-                b[i] = -del_f0[i]
+        cstr_b = np.ones(n_cstr,dtype=bool)
+        if (l<0).any(): # A constraint is not binding
+            cstr_b = (l<0).flatten()
+            n_bind = np.asscalar(sum(cstr_b)) # Number of binding constraints
+            if settings.verbose: print("Constraint is not binding at the optimum.")
+            A = np.zeros((n_vars+n_bind,n_vars+n_bind))
+            b = np.zeros((n_vars+n_bind,1))
+            A[:n_vars,:n_vars] = del_2_L0
+            A[:n_vars,n_vars:] = -del_g0[:,cstr_b]
+            A[n_vars:,:n_vars] = del_g0[:,cstr_b].T
+            b[:n_vars] = -del_f0
+            b[n_vars:] = np.reshape(-g0[cstr_b],(n_bind,1))
             
-            delta_x = np.linalg.solve(A,b)
+            x_lambda = np.linalg.solve(A,b)
+            delta_x = x_lambda[0:n_vars]
+            l_sol = x_lambda[n_vars:]
             l = np.zeros((n_cstr,1))
+            l[cstr_b] = l_sol
         
         x1 = x0+delta_x
         P1 = f.f(x1)
@@ -508,13 +506,13 @@ def sqp(f,g,x_start,settings):
             P1 += l[i]*abs(g[i].g(x1))
         mag_dx = np.linalg.norm(delta_x)
 
-        while P1 > f0:
+        while P1 > f0 and np.linalg.norm(delta_x) > settings.termination_tol:
             if settings.verbose: print("Stepped too far! Cutting step in half.")
             delta_x /= 2
             x2 = x1+delta_x
             P2 = f.f(x2)
             for i in range(n_cstr):
-                P2 += l[i]*abs(g[0][i](x2))
+                P2 += l[i]*abs(g[i].g(x2))
         
         while mag_dx > settings.termination_tol:
             iter += 1
@@ -530,8 +528,11 @@ def sqp(f,g,x_start,settings):
                 del_g1[:,i] = g[i].del_g(x1).flatten()
         
             # Update the Lagrangian Hessain
-            del_L0 = del_f0-np.asscalar(l)*del_g0
-            del_L1 = del_f1-np.asscalar(l)*del_g1
+            del_L0 = del_f0
+            del_L1 = del_f1
+            for i in range(n_cstr):
+                del_L0 += np.asscalar(l[i])*np.reshape(del_g0[:,i],(n_vars,1))
+                del_L1 += np.asscalar(l[i])*np.reshape(del_g1[:,i],(n_vars,1))
             gamma_0 = np.matrix(del_L1-del_L0)
             first = gamma_0*gamma_0.T/(gamma_0.T*np.matrix(delta_x))
             second = del_2_L0*(np.matrix(delta_x)*np.matrix(delta_x).T)*del_2_L0/(np.matrix(delta_x).T*del_2_L0*np.matrix(delta_x))
@@ -543,42 +544,41 @@ def sqp(f,g,x_start,settings):
             n_eqns = n_vars+n_cstr # At first assume all constraints are binding
             A = np.zeros((n_eqns,n_eqns))
             b = np.zeros((n_eqns,1))
-            for i in range(n_eqns):
-                for j in range(n_eqns):
-                    if i<n_vars and j<n_vars:
-                        A[i][j] = del_2_L1[i][j]
-                    elif i<n_vars:
-                        A[i][j] = -del_g1[i]
-                    elif j<n_vars:
-                        A[i][j] = del_g1[j]
-                    else:
-                        A[i][j] = 0
-                if i<n_vars:
-                    b[i] = -del_f1[i]
-                else:
-                    b[i] = -g1
+            A[:n_vars,:n_vars] = del_2_L1
+            A[:n_vars,n_vars:] = -del_g1
+            A[n_vars:,:n_vars] = del_g1.T
+            b[:n_vars] = -del_f1
+            b[n_vars:] = np.reshape(-g1,(n_cstr,1))
             
             x_lambda = np.linalg.solve(A,b)
             delta_x = x_lambda[0:n_vars]
             l = x_lambda[n_vars:n_eqns]
         
-            if l < 0: # Constraint is not binding
-                A = np.zeros((n_vars,n_vars))
-                b = np.zeros((n_vars,1))
-                for i in range(n_vars):
-                    for j in range(n_vars):
-                        A[i][j] = del_2_L1[i][j]
-                    b[i] = -del_f1[i]
+            cstr_b = np.ones(n_cstr,dtype=bool)
+            if (l<0).any(): # A constraint is not binding
+                cstr_b = (l<0).flatten()
+                n_bind = np.asscalar(sum(cstr_b)) # Number of binding constraints
+                if settings.verbose: print("Constraint is not binding at the optimum.")
+                A = np.zeros((n_vars+n_bind,n_vars+n_bind))
+                b = np.zeros((n_vars+n_bind,1))
+                A[:n_vars,:n_vars] = del_2_L0
+                A[:n_vars,n_vars:] = -del_g0[:,cstr_b]
+                A[n_vars:,:n_vars] = del_g0[:,cstr_b].T
+                b[:n_vars] = -del_f0
+                b[n_vars:] = np.reshape(-g0[cstr_b],(n_bind,1))
                 
-                delta_x = np.linalg.solve(A,b)
+                x_lambda = np.linalg.solve(A,b)
+                delta_x = x_lambda[0:n_vars]
+                l_sol = x_lambda[n_vars:]
                 l = np.zeros((n_cstr,1))
+                l[cstr_b] = l_sol
             
             x2 = x1+delta_x
             P2 = f.f(x2)
             for i in range(n_cstr):
                 P2 += l[i]*abs(g[i].g(x2))
         
-            while P2 > P1:
+            while P2 > P1 and np.linalg.norm(delta_x) > settings.termination_tol:
                 if settings.verbose: print("Stepped too far! Cutting step in half.")
                 delta_x /= 2
                 x2 = x1+delta_x
@@ -616,7 +616,7 @@ def append_file(iter,o_iter,i_iter,obj_fcn_value,alpha,mag_dx,design_point,gradi
     for value in design_point:
         values_msg = ('{0}, {1: 20.13E}'.format(values_msg, np.asscalar(value)))
     if (g != None).any():
-        for cstr in g[0]:
+        for cstr in g:
             values_msg = ('{0}, {1: 20.13E}'.format(values_msg, np.asscalar(cstr)))
     print(values_msg)
     with open(settings.opt_file, 'a') as opt_file:
