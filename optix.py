@@ -5,6 +5,8 @@ import shutil
 import time
 import multiprocessing
 import classes as c
+import csv
+import matplotlib.pyplot as plt
 
 np.set_printoptions(precision = 14)
 
@@ -131,6 +133,11 @@ def minimize(fun,x0,**kwargs):
         wolfe_curv(float,optional)
         -Value of c2 in the Wolfe conditions. Defaults to 0.9 for BGFS.
 
+        plot_path(bool,optional)
+        -If set to true, the path taken by the optimization, as well as constraints
+        and contours of the objective, will be plotted. Defaults to false. Will plot
+        in the first two variables specified.
+
     Output
     ------
 
@@ -149,6 +156,11 @@ def minimize(fun,x0,**kwargs):
                 How many calls were made to the objective function during optimization.
             cstr_calls(array-like(n_cstr),int)
                 How many calls were made to each constraint function during optimization.
+            x_path(array-like)
+                Each x point considered in the evaluation, each column of the array being
+                each point. The number of columns will be equal to the number of iterations.
+            f_path(array-like)
+                The value of the objective function at each point in x_path.
 
     """
 
@@ -226,6 +238,10 @@ def minimize(fun,x0,**kwargs):
     opt.obj_calls = f.eval_calls.value
     for i in range(n_cstr):
         opt.cstr_calls.append(g[i].eval_calls.value)
+
+    # Plot path taken by the optimizer
+    if settings.plot_path:
+        plot_path(opt_filename)
     
     # Run the final case
     return opt
@@ -450,6 +466,8 @@ def sqp(f,g,x_start,settings):
     
     x0 = np.copy(x_start)
     mag_dx = 1
+    
+    # Start outer iteration
     while iter < settings.max_iterations and mag_dx > settings.termination_tol:
         if settings.verbose: print("Setting Lagrangian Hessian to the identity matrix.")
         o_iter += 1
@@ -457,135 +475,38 @@ def sqp(f,g,x_start,settings):
         iter += 1
 
         # Create quadratic approximation
-        f0 = f.f(x0)
-        del_f0 = f.del_f(x0)
-        g0 = np.zeros(n_cstr)
-        del_g0 = np.zeros((n_vars,n_cstr))
-        for i in range(n_cstr):
-            g0[i] = g[i].g(x0)
-            del_g0[:,i] = g[i].del_g(x0).flatten()
-        del_2_L0 = np.identity(n_vars)
+        f0,del_f0,g0,del_g0 = get_quad_approx(x0,f,g,n_vars,n_cstr)
+        del_2_L0 = np.eye(n_vars)
         append_file(iter,o_iter,i_iter,f0,mag_dx,mag_dx,x0,del_f0,settings,g=g0,del_g=del_g0)
             
-        # Create the system of equations to solve for delta_x and lambda
-        n_eqns = n_vars+n_cstr # At first assume all constraints are binding
-        A = np.zeros((n_eqns,n_eqns))
-        b = np.zeros((n_eqns,1))
-        A[:n_vars,:n_vars] = del_2_L0
-        A[:n_vars,n_vars:] = -del_g0
-        A[n_vars:,:n_vars] = del_g0.T
-        b[:n_vars] = -del_f0
-        b[n_vars:] = np.reshape(-g0,(n_cstr,1))
+        # Estimate initial penalty function
+        P0 = f0
+        for constr in g0:
+            if constr < 0:
+                P0 -= constr
 
-        x_lambda = np.linalg.solve(A,b)
-        delta_x = x_lambda[0:n_vars]
-        l = x_lambda[n_vars:]
+        # Get step
+        delta_x,l,x1,f1,g1,P2 = get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,del_2_L0,del_f0,del_g0,g0,settings)
         
-        cstr_b = np.ones(n_cstr,dtype=bool)
-        if (l<0).any(): # A constraint is not binding
-            cstr_b = (l<0).flatten()
-            n_bind = np.asscalar(sum(cstr_b)) # Number of binding constraints
-            if settings.verbose: print("Constraint is not binding at the optimum.")
-            A = np.zeros((n_vars+n_bind,n_vars+n_bind))
-            b = np.zeros((n_vars+n_bind,1))
-            A[:n_vars,:n_vars] = del_2_L0
-            A[:n_vars,n_vars:] = -del_g0[:,cstr_b]
-            A[n_vars:,:n_vars] = del_g0[:,cstr_b].T
-            b[:n_vars] = -del_f0
-            b[n_vars:] = np.reshape(-g0[cstr_b],(n_bind,1))
-            
-            x_lambda = np.linalg.solve(A,b)
-            delta_x = x_lambda[0:n_vars]
-            l_sol = x_lambda[n_vars:]
-            l = np.zeros((n_cstr,1))
-            l[cstr_b] = l_sol
-        
-        x1 = x0+delta_x
-        P1 = f.f(x1)
-        for i in range(n_cstr):
-            P1 += l[i]*abs(g[i].g(x1))
         mag_dx = np.linalg.norm(delta_x)
-
-        while P1 > f0 and np.linalg.norm(delta_x) > settings.termination_tol:
-            if settings.verbose: print("Stepped too far! Cutting step in half.")
-            delta_x /= 2
-            x2 = x1+delta_x
-            P2 = f.f(x2)
-            for i in range(n_cstr):
-                P2 += l[i]*abs(g[i].g(x2))
         
+        # Start inner iteration
         while mag_dx > settings.termination_tol:
             iter += 1
             i_iter += 1
         
             # Create quadratic approximation
-            f1 = f.f(x1)
-            del_f1 = f.del_f(x1)
-            g1 = np.zeros((n_cstr,1))
-            del_g1 = np.zeros((n_vars,n_cstr))
-            for i in range(n_cstr):
-                g1[i] = g[i].g(x1)
-                del_g1[:,i] = g[i].del_g(x1).flatten()
+            f1,del_f1,g1,del_g1 = get_quad_approx(x1,f,g,n_vars,n_cstr)
         
             # Update the Lagrangian Hessain
-            del_L0 = del_f0
-            del_L1 = del_f1
-            for i in range(n_cstr):
-                del_L0 += np.asscalar(l[i])*np.reshape(del_g0[:,i],(n_vars,1))
-                del_L1 += np.asscalar(l[i])*np.reshape(del_g1[:,i],(n_vars,1))
-            gamma_0 = np.matrix(del_L1-del_L0)
-            first = gamma_0*gamma_0.T/(gamma_0.T*np.matrix(delta_x))
-            second = del_2_L0*(np.matrix(delta_x)*np.matrix(delta_x).T)*del_2_L0/(np.matrix(delta_x).T*del_2_L0*np.matrix(delta_x))
-            del_2_L1 = np.asarray(del_2_L0+first-second)
+            del_2_L1 = get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x)
 
             append_file(iter,o_iter,i_iter,f1,mag_dx,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
         
-            # Create the system of equations to solve for delta_x and lambda
-            n_eqns = n_vars+n_cstr # At first assume all constraints are binding
-            A = np.zeros((n_eqns,n_eqns))
-            b = np.zeros((n_eqns,1))
-            A[:n_vars,:n_vars] = del_2_L1
-            A[:n_vars,n_vars:] = -del_g1
-            A[n_vars:,:n_vars] = del_g1.T
-            b[:n_vars] = -del_f1
-            b[n_vars:] = np.reshape(-g1,(n_cstr,1))
+            # Get step
+            delta_x,l,x2,f2,g2,P2 = get_delta_x(x1,f0,f,g,P0,n_vars,n_cstr,del_2_L1,del_f1,del_g1,g1,settings)
             
-            x_lambda = np.linalg.solve(A,b)
-            delta_x = x_lambda[0:n_vars]
-            l = x_lambda[n_vars:n_eqns]
-        
-            cstr_b = np.ones(n_cstr,dtype=bool)
-            if (l<0).any(): # A constraint is not binding
-                cstr_b = (l<0).flatten()
-                n_bind = np.asscalar(sum(cstr_b)) # Number of binding constraints
-                if settings.verbose: print("Constraint is not binding at the optimum.")
-                A = np.zeros((n_vars+n_bind,n_vars+n_bind))
-                b = np.zeros((n_vars+n_bind,1))
-                A[:n_vars,:n_vars] = del_2_L0
-                A[:n_vars,n_vars:] = -del_g0[:,cstr_b]
-                A[n_vars:,:n_vars] = del_g0[:,cstr_b].T
-                b[:n_vars] = -del_f0
-                b[n_vars:] = np.reshape(-g0[cstr_b],(n_bind,1))
-                
-                x_lambda = np.linalg.solve(A,b)
-                delta_x = x_lambda[0:n_vars]
-                l_sol = x_lambda[n_vars:]
-                l = np.zeros((n_cstr,1))
-                l[cstr_b] = l_sol
-            
-            x2 = x1+delta_x
-            P2 = f.f(x2)
-            for i in range(n_cstr):
-                P2 += l[i]*abs(g[i].g(x2))
-        
-            while P2 > P1 and np.linalg.norm(delta_x) > settings.termination_tol:
-                if settings.verbose: print("Stepped too far! Cutting step in half.")
-                delta_x /= 2
-                x2 = x1+delta_x
-                P2 = f.f(x2)
-                for i in range(n_cstr):
-                    P2 += l[i]*abs(g[i].g(x2))
-        
+            # Setup variables for next iterations
             x0 = x1
             x1 = x2
             f0 = f1
@@ -595,7 +516,11 @@ def sqp(f,g,x_start,settings):
             del_2_L0 = del_2_L1
             P1 = P2
             mag_dx = np.linalg.norm(delta_x)
+            
+            # End of inner loop
+        # End of outer loop
     
+    # Evaluate final case
     f2 = f.f(x2)
     del_f2 = f.del_f(x2)
     g2 = np.zeros((n_cstr,1))
@@ -605,6 +530,96 @@ def sqp(f,g,x_start,settings):
         del_g2[:,i] = g[i].del_g(x2).flatten()
     append_file(iter,o_iter,i_iter,f2,mag_dx,mag_dx,x2,del_f2,settings,g=g2,del_g=del_g2)
     return c.OptimizerResult(f2,x2,True,"Optimizer exitted normally.",iter)
+
+
+def get_quad_approx(x0,f,g,n_vars,n_cstr):
+    f0 = f.f(x0)
+    del_f0 = f.del_f(x0)
+    g0 = np.zeros(n_cstr)
+    del_g0 = np.zeros((n_vars,n_cstr))
+    for i in range(n_cstr):
+        g0[i] = g[i].g(x0)
+        del_g0[:,i] = g[i].del_g(x0).flatten()
+    return f0,del_f0,g0,del_g0
+
+
+def get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x):
+    del_L0 = np.copy(del_f0)
+    del_L1 = np.copy(del_f1)
+    for i in range(n_cstr):
+        del_L0 -= np.asscalar(l[i])*np.reshape(del_g0[:,i],(n_vars,1))
+        del_L1 -= np.asscalar(l[i])*np.reshape(del_g1[:,i],(n_vars,1))
+    gamma_0 = np.matrix(del_L1-del_L0)
+    first = gamma_0*gamma_0.T/(gamma_0.T*np.matrix(delta_x))
+    second = del_2_L0*(np.matrix(delta_x)*np.matrix(delta_x).T)*del_2_L0/(np.matrix(delta_x).T*del_2_L0*np.matrix(delta_x))
+    return np.asarray(del_2_L0+first-second)
+
+
+def get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,del_2_L0,del_f0,del_g0,g0,settings):
+    # Solve for delta_x and lambda, at first assuming no constraints are binding and updating from there.
+    iterate = True
+    cstr_b = np.ones(n_cstr,dtype=bool)
+    while iterate:
+        print(cstr_b)
+        iterate = False # By default, the loop will be exitted after one iteration
+
+        n_bind = np.asscalar(sum(cstr_b)) # Number of binding constraints
+
+        # Create linear system to solve for delta_x and lambda
+        A = np.zeros((n_vars+n_bind,n_vars+n_bind))
+        b = np.zeros((n_vars+n_bind,1))
+        A[:n_vars,:n_vars] = del_2_L0
+        A[:n_vars,n_vars:] = -del_g0[:,cstr_b]
+        A[n_vars:,:n_vars] = del_g0[:,cstr_b].T
+        b[:n_vars] = -del_f0
+        b[n_vars:] = np.reshape(-g0[cstr_b],(n_bind,1))
+        
+        # Solve system and parse solution
+        x_lambda = np.linalg.solve(A,b)
+        delta_x = x_lambda[0:n_vars]
+        l_sol = x_lambda[n_vars:]
+        l = np.zeros((n_cstr,1))
+        l[cstr_b] = l_sol
+
+        # Check for non-binding constraints
+        if (l<0).any():
+            iterate = True
+            cstr_b = (l>0).flatten()
+            continue
+
+        # Check for binding constraints
+        x1 = x0+delta_x
+        g1 = np.zeros(n_cstr)
+        for i in range(n_cstr):
+            g1[i] = g[i].g(x1)
+        for i in range(n_cstr):
+            if g1[i]<0 and not cstr_b[i]:
+                iterate = True
+                cstr_b[i] = True
+                break
+
+    # Check penalty function
+    x1 = x0+delta_x
+    f1 = f.f(x1)
+    P1 = f1
+    g1 = np.zeros(n_cstr)
+    for i in range(n_cstr):
+        g1[i] = g[i].g(x1)
+        P1 += l[i]*abs(g1[i])
+    
+    # Cut back step if the penalty function has increased
+    while P1 > P0 and np.linalg.norm(delta_x) > settings.termination_tol:
+        if settings.verbose: print("Stepped too far! Cutting step in half.")
+        delta_x /= 2
+        x1 = x0+delta_x
+        f1 = f.f(x1)
+        P1 = f1
+        g1 = np.zeros(n_cstr)
+        for i in range(n_cstr):
+            g1[i] = g[i].g(x1)
+            P1 += l[i]*abs(g1[i])
+
+    return delta_x,l,x1,f1,g1,P1
 
 
 def append_file(iter,o_iter,i_iter,obj_fcn_value,alpha,mag_dx,design_point,gradient,settings,**kwargs):
@@ -664,3 +679,22 @@ def printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings):
             print('using forward difference approximation')
     print('')
 
+
+def plot_path(opt_filename):
+    x = []
+    with open(opt_filename,'r') as output_file:
+        output_reader = csv.reader(output_file,delimiter=',')
+        first = True
+        for row in output_reader:
+            if first:
+                first = False
+                continue
+            x.append([float(row[6]),float(row[7])])
+    
+    x = np.asarray(x)
+
+    plt.plot(x[:,0],x[:,1],"gx-")
+    plt.xlabel("x0")
+    plt.ylabel("y0")
+    plt.title("Path of Optimization Algorithm")
+    plt.show()

@@ -53,6 +53,7 @@ class Settings:
         self.max_iterations = kwargs.get("max_iterations",np.inf)
         self.wolfe_armijo = kwargs.get("wolfe_armijo",1e-4)
         self.wolfe_curv = kwargs.get("wolfe_curv",0.9)
+        self.plot_path = kwargs.get("plot_path",False)
 
         self.use_finite_diff = grad == None
 
