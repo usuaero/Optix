@@ -1,4 +1,9 @@
-This is the legacy version of Optix. Past this commit, the API has been changed
-and compatability with existing code is not guaranteed.
+AeroLab Optimization Software
 
-Thank you and have a nice day.
+Created by Dr Doug Hunsaker (professor, Utah State University; director, USU AeroLab)
+
+README (last revision: 1/7/2019)
+
+--------------------------------------------------------------------
+INTRODUCTION
+--------------------------------------------------------------------

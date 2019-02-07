@@ -1,731 +1,700 @@
-import json
-from myjson import myjson
 from collections import OrderedDict
 import numpy as np
 import os
 import shutil
 import time
-
 import multiprocessing
+import classes as c
+import csv
+import matplotlib.pyplot as plt
 
 np.set_printoptions(precision = 14)
 
 zero = 1.0e-20
 
+def minimize(fun,x0,**kwargs):
+    """Minimize a scalar function in one or more variables
 
-class objective_model(object):
-    """Defines the evaluation model of an objective function
-    
-    This class defines a model consisting of an objective function that can be
-    evaluated individually and with gradients. The class allows this function
-    to be executed at multiple design points, either synchronously or
-    asynchronously (using the Python multiprocessing module).
-    
-    Two methods for evaluating the function are used. The first method is
-    required and evaluates only the function itself, while the second method
-    is optional and evaluates the function and its gradient with respect to the
-    design variables. If the second function is not provided, a second-order
-    central differencing scheme is used to approximate gradients when needed.
-    """
-    def __init__(self,
-                 objective_fcn,
-                 objective_fcn_with_gradient = None,
-                 max_processes = 1,
-                 dx = 0.01
-                ):
-        """Constructor
-        
-        Constructor for the objective_model class
-        
-        Inputs
-        ------
-        objective_fcn:
-            The function to evaluate through this model. The function should
-            accept two arguments. The first argument is a list of design
-            variable values specifying a fixed design point. The second
-            argument is the case number assigned to the evaluation. The
-            function should return a single result that is the value of the
-            objective function at the specified design point.
-
-        objective_fcn_with_gradient:
-            The function to evaluate through this model when gradients are
-            requested. The function should accept the same two arguments as
-            objective_fcn. The function should return two results: the value
-            of the objective function at the specified design point and the
-            gradient of the objective function at the specified design point.
-            Note that the first return value should be equal to the
-            objective_fcn return value for a given design point.
-            
-            If objective_fcn_with_gradient is not specified (default), a
-            second-order central difference approximation will be used with
-            objective_fcn when gradients are needed.
-            
-        max_processes:
-            The maximum number of simultaneous processes to use. If set to 1
-            (default), all function evaluations will be executed sequentially.
-            Otherwise, the Python multiprocessing module will be used to
-            execute multiple function evaluations simultaneously.
-            
-        dx:
-            The perturbation size to use if the second-order central difference
-            approximation is used to estimate the gradient of the function. If
-            objective_fcn_with_gradient is specified, dx is not used.
-        """
-        # Set the objective function
-        self.obj_fcn = objective_fcn
-        
-        # Set the gradient function
-        if objective_fcn_with_gradient is not None:
-            # Use the user-specified function to calculate gradients
-            self.obj_fcn_with_gradient = objective_fcn_with_gradient
-        else:
-            # Use central differencing scheme to approximate the gradient
-            self.obj_fcn_with_gradient = self.central_difference
-            self.dx = dx
-            
-        # Set the maximum number of simultaneous processes
-        self.max_processes = max_processes
-        
-        # Initialize the number of function/gradient evaluations
-        self.n_fcn_evals = 0
-        self.n_grad_evals = 0
-
-        
-    def evaluate(self, design_points):
-        """Evaluate the function at multiple design points
-        
-        This routine evaluates the objective function at multiple design
-        points, each specified by a list of design variables.
-        
-        Inputs
-        ------
-        design_points = A list of design points. A design point is defined by
-                        a list of design variables that are passed into the
-                        objective function for a single evaluation. Therefore,
-                        design_points is a list of lists.
-               
-        Outputs
-        -------
-        objective = A list of results from the objective function,
-                    corresponding to the value of the objective function at
-                    each design point specified.
-        
-        """
-        objective = []
-        if self.max_processes > 1:
-            # Execute function at multiple design points in parallel
-            with multiprocessing.Pool(processes = self.max_processes) as pool:
-                args = [(design_points[i], i + 1) for i in range(len(design_points))]
-                objective = pool.map(self.obj_fcn, args)
-        else:
-            # Execute function at each design point sequentially
-            for i in range(len(design_points)):
-                objective.append(self.obj_fcn((design_points[i], i + 1)))
-
-        # Increment the number of function evaluations
-        self.n_fcn_evals += len(design_points)
-        
-        return objective
-
-        
-    def evaluate_gradient(self, design_point):
-        """Evaluate the function and its gradient at a specified design point
-        
-        This routine evaluates the objective function and its gradient at a
-        single design point.
-        
-        Inputs
-        ------
-        design_point = The design point at which to evaluate the function and
-                       its gradient. The design point is defined as a list of
-                       values, one value for each design variable required by
-                       the objective function.
-                       
-        Outputs
-        -------
-        objective = The value of the objective function at the specified design
-                    point.
-                    
-        gradient = The gradient of the objective function at the specified
-                   design point.
-        """
-        objective, gradient = self.obj_fcn_with_gradient((design_point, 0))
-        self.n_fcn_evals += 1
-        self.n_grad_evals += 1
-
-        return objective, gradient
-    
-    
-    def central_difference(self, args):
-        """Approximate the gradient of a function using central differencing
-        
-        This routine approximates the gradient of a specified function with respect
-        to all design variables at a specified design point. The gradient is
-        approximated using second-order central differencing.
-        
-        Inputs
-        ------
-        design_point = A list of design variables defining the design point at
-                       which the objective function and its gradient will be
-                       evaluated
-                       
-        case_id = The case ID to use for the objective function evaluation. The
-                  case IDs for gradient evaluations will be incremented
-                  sequentially starting from (case_id + 1).
-        """
-        design_point = args[0]
-        case_id = args[1]
-        # Initialize a list of objective function arguments by perturbing each
-        # variable by +/-dx
-        n_design_vars = len(design_point)
-        argslist = [(design_point[:], i) for i in range(case_id, case_id + 2 * n_design_vars + 1)]
-        for i in range(1, n_design_vars + 1):
-            argslist[i][0][i - 1] += self.dx
-            argslist[i + n_design_vars][0][i - 1] -= self.dx
-        
-        if self.max_processes > 1:
-            # Execute function at multiple design points in parallel
-            with multiprocessing.Pool(processes = self.max_processes) as pool:
-                results = pool.map(self.obj_fcn, argslist)
-        else:
-            # Execute function at each design point sequentially
-            results = []
-            for a in argslist:
-                results.append(self.obj_fcn(a))
-                
-        # Get the objective function value at the specified design point
-        objective = results[0]
-        
-        # Calculate the gradient of the objective function from results
-        # at the perturbed design points
-        gradient = []
-        for i in range(1, n_design_vars + 1):
-            gradient.append((results[i] - results[i + n_design_vars]) / (2.0 * self.dx))
-
-        return objective, gradient
-
-        
-class settings(object):
-    """Defines the various settings used by the optimization algorithm
-    
-    
-    
-    """
-    def __init__(self):
-        self.opt_file = 'optimization.txt'
-        self.grad_file = 'gradient.txt'
-        self.verbose = False
-        
-        self.nvars = 0
-        self.varnames = []
-        self.varsinit = []
-        self.opton = []
-        
-        self.default_alpha = 0.0
-        self.stop_delta = 1.0E-12
-        self.nsearch = 8
-        self.line_search_type = 'quadratic'
-        self.alpha_tol = 0.1
-        self.max_refinements = 100
-        self.rsq_tol = 0.99
-        self.max_alpha_factor = 100
-
-        self.wolfe_armijo = 1.0e-4
-        self.wolfe_curv = 0.9
-        
-        self.nconstraints = 0
-        self.constrainttype = []
-        self.constraintnames = []
-        self.constraintvalues = []
-        self.penalty = []
-        self.penalty_factor = []
-
-
-    def load(settings_file):
-        self = settings()
-        input = myjson(settings_file)
-            
-        # Read settings from JSON file
-        json_settings = input.get('settings', OrderedDict)
-        self.default_alpha = json_settings.get('default_alpha', float)
-        self.stop_delta = json_settings.get('stop_delta', float)
-        self.nsearch = json_settings.get('n_search', int)
-        self.line_search_type = json_settings.get('line_search_type', str, 'quadratic')
-        self.verbose = json_settings.get('verbose', bool, False)  # optional
-        
-        self.alpha_tol = json_settings.get('alpha_tol', float, self.alpha_tol)
-        self.max_refinements = json_settings.get('max_refinements', int, self.max_refinements)
-        self.rsq_tol = json_settings.get('rsq_tol', float, self.rsq_tol)
-        self.max_alpha_factor = json_settings.get('max_alpha_factor', int, self.max_alpha_factor)
-
-        self.wolfe_armijo = json_settings.get('wolfe_armijo', float, self.wolfe_armijo)
-        self.wolfe_curv = json_settings.get('wolfe_curvature', float, self.wolfe_curv)
-        
-        # Read variables
-        json_variables = input.get('variables', OrderedDict, OrderedDict())
-        self.nvars = 0
-        self.varnames = []
-        self.varsinit = []
-        self.opton = []
-        for var_name in json_variables.data:
-            self.add_variable(var_name,
-                              json_variables.get(var_name +'.init', float),
-                              json_variables.get(var_name + '.opt', str) == 'on')
-        
-        # Read constraints
-        json_constraints = input.get('constraints', OrderedDict, OrderedDict())
-        self.nconstraints = len(json_constraints.data)
-        self.nconstraints = 0
-        self.contrainttype = []
-        self.constraintnames = []
-        self.constraintvalues = []
-        self.penalty = []
-        self.penalty_factor = []
-        valid_constraint_types = ['=', '<', '>']
-        for const_name in json_constraints.data:
-            json_constraint_data = json_constraints.get(const_name, OrderedDict)
-            const_type = json_constraint_data.get('type', str)
-            if const_type not in valid_constraint_types:
-                print('Unknown constraint type: {0}. Constraint {1} skipped.'
-                    .format(const_type, const_name))
-                print('Valid constraint types are {0}.'.format(valid_constraint_types))
-                continue
-            
-            self.constrainttype.append(const_type)
-            self.constraintnames.append(const_name)
-            self.constraintvalues.append(json_constraint_data.get('value', float))
-            self.penalty.append(json_constraint_data.get('penalty', float))
-            self.penalty_factor.append(json_constraint_data.get('factor', float))
-            
-        return self
-
-
-    def write(self, settings_file):
-        data = OrderedDict()
-        data['settings'] = OrderedDict()
-        data['settings']['default_alpha'] = self.default_alpha
-        data['settings']['stop_delta'] = self.stop_delta
-        data['settings']['n_search'] = self.nsearch
-        data['settings']['line_search_type'] = self.line_search_type
-        data['settings']['verbose'] = self.verbose
-
-        data['settings']['alpha_tol'] = self.alpha_tol
-        data['settings']['max_refinements'] = self.max_refinements
-        data['settings']['rsq_tol'] = self.rsq_tol
-        data['settings']['max_alpha_factor'] = self.max_alpha_factor
-
-        data['settings']['wolfe_armijo'] = self.wolfe_armijo
-        data['settings']['wolfe_curvature'] = self.wolfe_curv
-
-        data['variables'] = OrderedDict()
-        for i in range(self.nvars):
-            data['variables'][self.varnames[i]] = OrderedDict()
-            data['variables'][self.varnames[i]]['init'] = self.varsinit[i]
-            data['variables'][self.varnames[i]]['opt'] = self.opton[i]
-
-        with open(settings_file, 'w') as settings:
-            json.dump(data, settings, indent = 4)
-
-
-    def add_variable(self, varname, varinit, opton = True):
-        if varname in self.varnames:
-            i = self.varnames.index(varname)
-            self.varsinit[i] = varinit
-            self.opton[i] = opton
-        else:
-            self.varnames.append(varname)
-            self.varsinit.append(varinit)
-            self.opton.append(opton)
-            self.nvars += 1
-
-
-def optimize(obj_model, settings):
-    """
-    """
-    header = ('{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'
-        .format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)'))
-    for name in settings.varnames: header += ', {0:>20}'.format(name)
-    with open(settings.opt_file, 'w') as opt_file:
-        opt_file.write(header + '\n')
-    
-    with open(settings.grad_file, 'w') as grad_file:
-        grad_file.write(header + '\n')
-    
-    print('---------- Variables ----------')
-    for i in range(settings.nvars):
-        print('{0} = {1}'.format(settings.varnames[i], settings.varsinit[i]))
-    print('')
-    
-    print('---------- Constraints ----------')
-    for i in range(settings.nconstraints):
-        print('{0}, {1}, {2}'.format(settings.constraintnames[i],
-            settings.constrainttype[i], settings.constraintvalues[i]))
-    print('')    
-    
-    print('---------- Settings ----------')
-    print('      default alpha: {0}'.format(settings.default_alpha))
-    print('     stopping delta: {0}'.format(settings.stop_delta))
-    print('')
-    
-    iter = 0
-    o_iter = 0
-    mag_dx = 1.0
-    design_point = settings.varsinit[:]
-    while mag_dx > settings.stop_delta:
-        design_point_init = np.copy(design_point)
-        i_iter = 0
-        
-        print('Constraint Penalties')
-        for i in range(settings.nconstraints):
-            print('{0} {1}'.format(settings.constraintnames[i], settings.penalty[i]))
-            
-        print('Beginning new update matrix')
-        print(header)
-        
-        alpha = 0.0
-        while mag_dx > settings.stop_delta:
-            obj_value, gradient = obj_model.evaluate_gradient(design_point)
-            append_file(iter, o_iter, i_iter, obj_value, alpha, mag_dx, design_point, gradient, settings)
-            
-            # Initialize N to the identity matrix
-            if (i_iter == 0):
-                N = np.eye(settings.nvars)  # n x n
-
-            else:
-                dx = np.matrix(design_point - design_point_prev)  # 1 x n
-                gamma = np.matrix(gradient - gradient_prev)  # 1 x n
-                NG = N * np.transpose(gamma)  # n x 1
-                denom = dx * np.transpose(gamma)  # 1 x 1
-                N += ((1.0 + np.dot(gamma, NG) / denom)[0,0] * (np.transpose(dx) * dx) / denom
-                      - ((np.transpose(dx) * (gamma * N)) + (NG * dx)) / denom
-                     )
-
-                # Calculate the second Wolfe condition for the previous
-                # iteration. The curvature condition ensures that the slope is
-                # sufficiently large to contribute to a reduction in the
-                # objective function. If this condition is not met, the inner
-                # loop is stopped and the direction matrix is reset to the
-                # direction of steepest descent.
-                if np.dot(s, gradient) < settings.wolfe_curv * np.dot(s, gradient_prev):
-                    print("Wolfe condition (ii): curvature condition not satisified!")
-                    break
-                
-            s = -np.dot(N, gradient)
-            design_point_prev = np.copy(design_point)
-            gradient_prev = np.copy(gradient)
-            
-            alpha, design_point = line_search(design_point[:], obj_value, gradient, s, obj_model, settings)
-            
-            dx = design_point - design_point_prev
-            mag_dx = np.linalg.norm(dx)
-            i_iter += 1
-            iter += 1
-            
-#TODO:        save_file_name = 'optix_save.json'
-#TODO:        self.write_optix_file(save_file_name)
-        
-        dx = design_point - design_point_init
-        mag_dx = np.linalg.norm(dx)
-        append_file(iter, o_iter, i_iter, obj_value, alpha, mag_dx, design_point, gradient, settings)
-        
-        o_iter += 1
-        for i in range(settings.nconstraints):
-            settings.penalty[i] = settings.penalty[i] * settings.penalty_factor[i]
-    
-    # Run the final case
-    obj_value = obj_model.obj_fcn((design_point, -1))
-    append_file(iter, o_iter, i_iter, obj_value, 0.0, mag_dx, design_point, gradient, settings)
-    return (obj_value, design_point)
-    
-    
-def line_search(design_point, obj_value, gradient, s, obj_model, settings):
-    if settings.line_search_type == 'quadratic':
-        return line_search_quad(design_point, obj_value, gradient, s, obj_model, settings)
-    else:
-        return line_search_lin(design_point, obj_value, s, obj_model, settings)
-    
-    
-def line_search_lin(design_point, obj_value, s, obj_model, settings):
-    if settings.verbose:
-        print('line search ----------------------------------------------------------------------------')
-
-    s_norm = np.linalg.norm(s)
-    alpha = max(settings.default_alpha, 1.1 * settings.stop_delta / s_norm)
-    alpha_mult = settings.nsearch / 2.0
-    
-    found_min = False
-    while not found_min:
-        xval, yval = run_mult_cases(settings.nsearch, alpha, s, design_point, obj_value, obj_model)
-        if settings.verbose:
-            for i in range(settings.nsearch + 1):
-                print('{0:5d}, {1:15.7E}, {2:15.7E}'.format(i, xval[i], yval[i]))
-        
-        mincoord = yval.index(min(yval))
-        if yval[1] > yval[0]:
-            if (alpha * s_norm) < settings.stop_delta:
-                print('Line search within stopping tolerance: alpha = {0}'.format(alpha))
-                return alpha, design_point
-            elif mincoord == 0:
-                if settings.verbose: print('Too big of a step. Reducing alpha')
-                alpha /= alpha_mult
-            else:
-                if mincoord < settings.nsearch: found_min = True
-                else: alpha *= alpha_mult
-        else:
-            if settings.verbose: print('mincoord = {0}'.format(mincoord))
-            if mincoord == 0: return alpha, design_point
-            elif mincoord < settings.nsearch: found_min = True
-            else: alpha *= alpha_mult
-    
-    a1 = xval[mincoord - 1]
-    a2 = xval[mincoord]
-    a3 = xval[mincoord + 1]
-    f1 = yval[mincoord - 1]
-    f2 = yval[mincoord]
-    f3 = yval[mincoord + 1]
-    
-    da = a2 - a1
-    alpha = a1 + da * (4.0 * f2 - f3 - 3.0 * f1) / (2.0 * (2.0 * f2 - f3 - f1))
-    if alpha > a3 or alpha < a1:
-        if f2 > f1: alpha = a1
-        else: alpha = a2
-        
-    for i in range(len(design_point)):
-        design_point[i] += alpha * s[i]
-
-#TODO:    self.constraints()
-    if settings.verbose: print('Final alpha = {0}'.format(alpha))
-    return alpha, design_point
-
-
-def line_search_quad(design_point, obj_value, gradient, s, obj_model, settings):
-    """Perform a quadratic line search to minimize the objective function
-    
-    This subroutine evaluates the objective function multiple times in the
-    direction of s and fits a parabola to the results using a least-squares
-    algorithm to identify the minimum value for the objective function in
-    the current direction.
-    
     Inputs
     ------
-    design_point = A list of design variables defining the design point at
-                   which to begin the line search
- 
-    obj_value = The value of the objective function at the specified design
-                point.
 
-    gradient = The gradient of the objective function at the specified design
-               point.
-                
-    s = The direction matrix defining the direction in which to conduct the
-        line search.
+        fun(callable)
+        - Objective to be minimized. Must be a scalar function:
+        def fun(x,*args):
+            return float
+        where x is a vector of the design variables and *args is all
+        other parameters necessary for calling the function.
+
+        x0(array-like,shape(n,))
+        - A starting guess for the independent variables. May be
+        a list or numpy array. All variables must be represented as
+        minimize determines the number of variables from the length
+        of this vector.
+
+        args(tuple,optional)
+        - Arguments to be passed to the objective function.
+
+        method(str,optional)
+        - Method to be used by minimize to find the minimum of the
+        objective function. May be one of the following:
+            Unconstrained problem:
+                "bgfs" - quasi-Nexton with BGFS Hessian update
+            Constrained problem:
+                "sqp" - sequential quadratic programming
+                "grg" - generalized reduced gradient
+        If no method is specified, minimize will choose either "bgfs"
+        or "sqp", based on whether constraints were given.
+
+        grad(callable,optional)
+        - Returns the gradient of the objective function at a specified
+        point. Definition is the same as fun() but must return array-like,
+        shape(n,). If not specified, will be estimated using a finite-
+        difference approximation.
+
+        hess(callable,optional)
+        - Returns the Hessian of of the objective function at a specified
+        point. Definition is the same as fun() but must return array-like,
+        shape(n,n). If not specified, will be estimated using a finite-
+        difference approximation.
+        NOTE: bgfs, sqp, and grg do not require direct Hessian evaluations,
+        so this functionality is not defined at this time.
+
+        bounds(sequence of tuple,optional)
+        - Bounds on independent variables. Can only be used with constrained
+        methods. Should be a sequence of (min,max) pairs for each element in
+        x. Use -numpy.inf or numpy.inf to specify mo bound.
+
+        constraints(list of {Constraint,dict}, optional)
+        - Constraints on the design space. Can only be used with constrained
+        methods. Given as a list of dictionaries, each having the following
+        keys:
+            type (str)
+                Constraint type; either 'eq' for equality or 'ineq' for
+                inequality; equality means the constraint function must
+                equate to 0 and inequality means the constraint function
+                must be positive.
+            fun (callable)
+                Value of the constraint function. Must return a scalar. May 
+                only have one argument, being an array of the design variables.
+            grad (callable,optional)
+                Returns the gradient of the constraint function at a
+                specified point. Must return array-like, shape(n,). May
+                only have one argument, being an array of the design variables.
+
+        termination_tol(float,optional)
+        - Point at which the optimization will quit. Execution terminates
+        if the change in x for any step becomes less than the termination
+        tolerance. Defaults to 1e-12.
+
+        verbose(bool,optional)
+        - If set to true, extra information about each step of the
+        optimization will be printed to the command line.
+
+        cent_diff(bool,optional)
+        - Flag for setting finite-difference approximation method. If set
+        to false, a forward-difference approximation will be used. Otherwise
+        defaults to a central-difference.
+
+        file_tag(str,optional)
+        - Tag to be appended to the output filenames. If not specified,
+        output files will be overwritten each time minimize() is called.
+        Output files may still be overwritten if file_tag does not change
+        with each call.
+
+        max_processes(int,optional)
+        - Maximum number of processes to be used in multiprocessing. Defaults
+        to 1.
+
+        dx(float,optional)
+        - Step size to be used in finite difference methods. Defaults to 0.001
+
+        default_alpha(float,optional)
+        - Initial step size to be used in the line search. Defaults to 1.
+
+        line_search(string,optional)
+        - Specifies which type of line search should be conducted in the search
+        direction. The following types are possible:
+            "bracket" - backets minimum and finds vertex of parabola formed by
+            3 minimum points
+            "quadratic" - fits a quadratic to the search points and finds vertex
+        Defaults to bracket. Not defined for SQP algorithm.
+
+        n_search(int,optional)
+        -Number of points to be considered in the search direction. Defaults to
+        8. Not defined for SQP algorithm.
+
+        max_iterations(int,optional)
+        -Maximum number of iterations for the optimization algorithm. Defaults to
+        inf.
+
+        wolfe_armijo(float,optional)
+        -Value of c1 in the Wolfe conditions. Defaults to 1e-4.
+
+        wolfe_curv(float,optional)
+        -Value of c2 in the Wolfe conditions. Defaults to 0.9 for BGFS.
+
+        plot_path(bool,optional)
+        -If set to true, the path taken by the optimization, as well as constraints
+        and contours of the objective, will be plotted. Defaults to false. Will plot
+        in the first two variables specified.
+
+    Output
+    ------
+
+        Optimum(OptimizerResult)
+        - Object containing information about the result of the optimization.
+        Attributes include:
+            x(array-like,shape(n,))
+                Point in the design space where the optimization ended.
+            f(scalar)
+                Value of the objective function at optimum.
+            success(bool)
+                Indicates whether the optimizer exitted normally.
+            message(str)
+                Message about how the optimizer exitted.
+            obj_calls(int)
+                How many calls were made to the objective function during optimization.
+            cstr_calls(array-like(n_cstr),int)
+                How many calls were made to each constraint function during optimization.
+            x_path(array-like)
+                Each x point considered in the evaluation, each column of the array being
+                each point. The number of columns will be equal to the number of iterations.
+            f_path(array-like)
+                The value of the objective function at each point in x_path.
+
+    """
+
+    #Initialize settings
+    settings = c.Settings(**kwargs)
+
+    #Initialize objective function
+    grad = kwargs.get("grad")
+    hess = kwargs.get("hess")
+    f = c.Objective(fun,settings,grad=grad,hess=hess)
+
+    #Initialize design variables
+    n_vars = len(x0)
+    x_start = np.reshape(x0,(n_vars,1))
+
+    #Initialize constraints
+    constraints = kwargs.get("constraints")
+    if constraints != None:
+        n_cstr = len(constraints)
+        n_ineq_cstr = 0
+        g = []
+        # Inequality constraints are stored first
+        for constraint in constraints:
+            if constraint["type"] == "ineq":
+                n_ineq_cstr += 1
+                grad = constraint.get("grad")
+                constr = c.Constraint(constraint["type"],constraint["fun"],settings,grad=grad)
+                g.append(constr)
+        for constraint in constraints:
+            if constraint["type"] == "eq":
+                grad = constraint.get("grad")
+                constr = c.Constraint(constraint["type"],constraint["fun"],settings,grad=grad)
+                g.append(constr)
+        g = np.array(g)
+    else:
+        g = None
+        n_cstr = 0
+        n_ineq_cstr = 0
+
+    settings.n_cstr = n_cstr
+    settings.n_ineq_cstr = n_ineq_cstr
+    bounds = kwargs.get("bounds")
+
+    #Begin formatting of output files
+    opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
+    for i in range(n_vars):
+        opt_header += ', {0:>20}'.format('x'+str(i))
+    for i in range(n_cstr):
+        opt_header += ', {0:>20}'.format('g'+str(i))
+
+    opt_filename = "optimize"+settings.file_tag+".txt"
+    settings.opt_file = opt_filename
+    with open(opt_filename, 'w') as opt_file:
+        opt_file.write(opt_header + '\n')
+
+    grad_header = '{0:>84}  {1:>20}'.format(' ','df')
+    for i in range(n_cstr):
+        grad_header += (', {0:>'+str(21*n_vars)+'}').format('dg'+str(i))
+    grad_header += '\n{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
+    for j in range(n_cstr+1):
+        for i in range(n_vars):
+            grad_header += ', {0:>20}'.format('dx'+str(i))
     
-    obj_model = The objective model object
+    grad_filename = "gradient"+settings.file_tag+".txt"
+    settings.grad_file = grad_filename
+    with open(grad_filename, 'w') as grad_file:
+        grad_file.write(grad_header + '\n')
+
+    #Print setup information to command line
+    printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings)
+    print(opt_header)
+
+    # Drive to the minimum
+    opt = find_minimum(f,g,x_start,settings)
+    opt.obj_calls = f.eval_calls.value
+    for i in range(n_cstr):
+        opt.cstr_calls.append(g[i].eval_calls.value)
+
+    # Plot path taken by the optimizer
+    if settings.plot_path:
+        plot_path(opt_filename)
     
-    settings = The optimization settings object
+    # Run the final case
+    return opt
+
+
+def find_minimum(f,g,x_start,settings):
+    """Calls specific optimization algorithm as needed"""
+    if settings.method == "bgfs":
+        return bgfs(f,x_start,settings)
+    elif settings.method == "sqp":
+        return sqp(f,g,x_start,settings)
+    elif settings.method == "grg":
+        return grg(f,g,x_start,settings)
+    else:
+        raise ValueError("Method improperly specified.")
+
+
+def bgfs(f,x_start,settings):
+    """Performs quasi-Newton, unconstrained optimization"""
+
+    if settings.verbose: print("Beginning simple unconstrained BGFS optimization.")
+    iter = -1
+    n = len(x_start)
+    o_iter = -1
+    mag_dx = 1
+    x0 = np.copy(x_start)
+    while iter < settings.max_iterations and mag_dx > settings.termination_tol:
+        if settings.verbose: print("Setting Hessian to the identity matrix.")
+        o_iter += 1
+        i_iter = 0
+        iter += 1
+
+        f0 = f.f(x0)
+        del_f0 = f.del_f(x0)
+        append_file(iter,o_iter,i_iter,f0,settings.alpha_d,mag_dx, x0, del_f0, settings)
+        N0 = np.eye(n)
+        s = -np.dot(N0,del_f0)
+        s = s/np.linalg.norm(s)
+        x1,f1,alpha = line_search(x0,f0,s,del_f0,f,settings)
+        delta_x0 = x1-x0
+        mag_dx = np.linalg.norm(delta_x0)
+
+        while iter < settings.max_iterations and mag_dx > settings.termination_tol:
+            i_iter += 1
+            iter += 1
+
+            # Update gradient and output file
+            del_f1 = f.del_f(x1)
+            append_file(iter,o_iter,i_iter,f1,alpha,mag_dx,x1,del_f1,settings)
+
+            # Check second Wolfe condition
+            if np.inner(s.T,del_f1.T) < settings.wolfe_curv*np.inner(s.T,del_f0.T):
+                print("Wolfe condition ii not satisfied.")
+                break
+
+            # Update Hessian
+            gamma0 = del_f1-del_f0
+            denom = np.matrix(delta_x0).T*np.matrix(gamma0)
+            NG = np.matrix(N0)*np.matrix(gamma0)
+            A = np.asscalar(1+np.matrix(gamma0).T*NG/denom)
+            B = (np.matrix(delta_x0)*np.matrix(delta_x0).T/denom)
+            C = (np.matrix(delta_x0)*np.matrix(gamma0).T*np.matrix(N0)+NG*np.matrix(delta_x0).T)/denom
+            N1 = N0+A*B-C
+
+            # Determine new search direction and perform line search
+            s = -np.dot(N1,del_f1)
+            s = s/np.linalg.norm(s)
+            x2,f2,alpha = line_search(x1,f1,s,del_f1,f,settings)
+            delta_x1 = x2-x1
+            mag_dx = np.linalg.norm(delta_x1)
+
+            # Update variables for next iteration
+            x0 = x1
+            f0 = f1
+            del_f0 = del_f1
+            delta_x0 = delta_x1
+            
+            x1 = x2
+            f1 = f2
+
+    del_f2 = f.del_f(x2)
+    append_file(iter,o_iter,i_iter,f2,alpha,mag_dx,x2,del_f2,settings)
+    return c.OptimizerResult(f2,x2,True,"Optimizer exitted normally.",iter)
+    
+    
+def line_search(x0,f0,s,del_f0,f,settings):
+    """Perform line search to find a minimum in the objective function.
+
+    This subroutine evaluates the objective function multiple times in the
+    direction of s. It either selects the minimum and two bracketting points
+    or all points and fits a parabola to these to find the vertex. The step 
+    length is adjusted if no bracketted minimum can be found.
+
+    Inputs
+    ------
+
+        x0(ndarray(n,))
+        -Point at which to start the line search.
+
+        f0(float)
+        -Objective function value at initial point.
+
+        s(ndarray(n,))
+        -Search direction.
+
+        del_f0(ndarray(n,))
+        -Gradient at x0
+
+        f(Objective)
+        -Objective function object.
+
+        settigns(Settings)
+        -Settings object.
 
     Outputs
     -------
-    alpha_min = The alpha corresponding to the minimum value of the objective
-                function in the current direction
-                
-    design_point = The design point corresponding to the minimum value of the
-                   objective function in the current direction
+
+        x1(ndarray(n,))
+        -Optimum point in the search direction.
+
+        f1(float)
+        -Value of objective function at optimum point.
+
+        alpha(float)
+        -Step size used to find optimum.
+
     """
     if settings.verbose:
-        print('Performing quadratic line search...')
+        print('line search ----------------------------------------------------------------------------')
 
-    # Determine the initial step size to use in the direction of s
-    stop_delta = settings.stop_delta / np.linalg.norm(s)
-    alpha = max(settings.default_alpha, 1.1 * stop_delta)
+    alpha = np.float(np.copy(settings.alpha_d))
+    alpha_mult = settings.n_search/2.0
 
-    found_min = False
-    line_search_min = (0.0, obj_value)
-    alpha_history = []
-
-    # Determine the maximum number of adjustments in alpha to attempt.
-    nadjust = int(np.ceil(-np.log10(stop_delta) /
-        np.log10(np.ceil(settings.nsearch / 2))))
-
-    for i in range(nadjust):
-        # Compute the objective function multiple times in the direction of s
-        alphas, obj_vals = run_mult_cases(settings.nsearch, alpha, s,
-                design_point, obj_value, obj_model)
-        alpha_history.append(alpha)
-
-        # Save the minimum data point for later comparisons
-        ind = obj_vals.index(min(obj_vals))
-        if obj_vals[ind] < line_search_min[1]:
-            line_search_min = (alphas[ind], obj_vals[ind])
-        alpha_min_est = line_search_min[0]
+    while True:
+        x_search = [x0+s*alpha*i for i in range(1,settings.n_search+1)]
+        with multiprocessing.Pool(processes=settings.max_processes) as pool:
+            f_search = pool.map(f.f,x_search)
+        x_search = [x0]+x_search
+        f_search = [f0]+f_search
 
         if settings.verbose:
-            for j in range(settings.nsearch + 1):
-                print('{:5d}, {:23.15E}, {:23.15E}'.format(
-                    j, alphas[j], obj_vals[j]))
-            
+            for i in range(settings.n_search + 1):
+                out = '{0:5d}'.format(i)
+                for j in range(len(x0)):
+                    out += ', {0:15.7E}'.format(np.asscalar(x_search[i][j]))
+                out += ', {0:15.7E}'.format(f_search[i])
+                print(out)
+
         # Check for invalid results
-        if np.isnan(obj_vals).any():
-            print('Found NaN')
+        if np.isnan(f_search).any():
+            print('Found NaN in line search at the following design point:')
+            print(x_search[np.where(np.isnan(f_search))])
             break
 
+        # Check for stopping criteria
+        if f_search[1] > f_search[0] and alpha < settings.termination_tol:
+            print('Alpha within stopping tolerance: alpha = {0}'.format(alpha))
+            return x0,f0,alpha
+        
         # Check for plateau
-        if min(obj_vals) == max(obj_vals):
+        if min(f_search) == max(f_search):
             print('Objective function has plateaued')
             break
             
-        # Check stopping criteria
-        if alpha <= stop_delta and ind < settings.nsearch - 1:
-            print('stopping criteria met')
-            break
-            
-        # Fit a quadratic through the data and find the resulting minimum
-        q = quadratic(np.asarray(alphas), np.asarray(obj_vals))
-        (alpha_min_est, obj_value_est) = q.vertex()
-        
-        if (alpha_min_est is None or alpha_min_est < 0 or not q.convex() or
-                q.rsq < settings.rsq_tol):
-            # Can't find a better minimum by curve fitting all data points.
-            # Try a quadratic through minimum and two closest neighbors.
-            left = min(max(ind - 1, 0), len(alphas) - 3)
-            right = left + 3
-            q = quadratic(np.asarray(alphas[left:right]), np.asarray(obj_vals[left:right]))
-            (alpha_min_est, obj_value_est) = q.vertex()
-            
-            if (alpha_min_est is None or alpha_min_est < 0 or not q.convex()):
-                if ind == settings.nsearch:
-                    # If minimum is at the end, try increasing alpha
-                    alpha_min_est = alpha * 4
-                elif ind == 0:
-                    # If minimum is at beginning, try reducing alpha
-                    alpha_min_est = alpha / 2
-                else:
-                    # Can't find a better minimum by curve fitting,
-                    # so just use the current minimum.
-                    break
-    
-        # Set alpha for next iteration
-        alpha = max(alpha / settings.max_alpha_factor, min(alpha * settings.max_alpha_factor,
-                alpha_min_est / np.ceil(settings.nsearch / 2.0)))
-        print('alpha for next iteration = ', alpha)
-        
-        # Check to see if we've already tried close to this alpha
-        alpha_close = min(alpha_history, key=lambda a: abs(a - alpha) / alpha)
-        delta = abs(alpha_close - alpha) / alpha
-        if delta <= settings.alpha_tol:
+        # See if alpha needs to be adjusted
+        min_ind = f_search.index(min(f_search))
+        if min_ind == 0:
+            if settings.verbose: print('Too big of a step. Reducing alpha')
+            alpha /= alpha_mult
+        elif min_ind == settings.n_search:
+            if settings.verbose: print('Too small of a step. Increasing alpha')
+            alpha *= alpha_mult
+        else:
             break
     
-    # Update design point based on alpha that minimized objective function
-    alpha_min = line_search_min[0]
-    design_point[:] += alpha_min * s[:]
+    # Find optimum value of alpha
+    a = [alpha*i for i in range(settings.n_search+1)]
+    alpha_opt = find_opt_alpha(a,f_search,min_ind,settings)
+    if settings.verbose: print('Final alpha = {0}'.format(alpha_opt))
+    x1 = x0+s*alpha_opt
+    f1 = f.f(x1)
 
-    # Calculate the first Wolfe condition. This is a measure of how much the
-    # step length (alpha) decreases the objective function, but has no effect
-    # on the behavior of the quadratic line search.
-    armijo = obj_value + settings.wolfe_armijo * alpha_min * np.dot(s, gradient)
-    if line_search_min[1] > armijo:
-        print("Wolfe condition (i): Armijo rule not satisfied.")
-
-#TODO:    self.constraints()
-    if settings.verbose: print('Line search minimized at alpha = {0}'.format(alpha_min))
-    return alpha_min, design_point
+    # Check first Wolfe condition (NOTE: does not affect execution)
+    armijo = f0+settings.wolfe_armijo*alpha_opt*np.inner(s.T,del_f0.T)
+    if f1 > armijo:
+        print("Wolve condition i not satisfied.")
+    return x1,f1,alpha_opt
 
 
-def run_mult_cases(nevals, alpha, s, dp0, obj_fcn0, obj_model):
-    # Calculate linearly distributed alphas for the line search
-    alphas = [(i * alpha) for i in range(nevals + 1)]
+def find_opt_alpha(a,f_search,min_ind,settings):
+    if settings.method == 'quadratic':
+        q = quadratic(np.asarray(a),np.asarray(f_search))
+        (alpha_opt,f_opt) = q.vertex()
+        
+        # If the quadratic fit is good, return its vertex
+        if not (alpha_opt is None or alpha_opt < 0 or not q.convex() or q.rsq < settings.rsq_tol):
+            return alpha_opt
     
-    # Set up the design points in the direction of the line search
-    design_points = []
-    for i in range(nevals):
-        design_points.append([(dp0[j] + alphas[i + 1] * s[j]) for j in range(len(dp0))])
+    # If bracketting method is selected, or is quadratic method fails, find the vertex defined by 3 minimum points
+    a1 = a[min_ind - 1]
+    a2 = a[min_ind]
+    a3 = a[min_ind + 1]
+    f1 = f_search[min_ind - 1]
+    f2 = f_search[min_ind]
+    f3 = f_search[min_ind + 1]
+    
+    alpha_opt = (f1*(a2**2-a3*2)+f2*(a3**2-a1**2)+f3*(a1**2-a2**2))/(2*(f1*(a2-a3)+f2*(a3-a1)+f3*(a1-a3)))
+    if alpha_opt > a3 or alpha_opt < a1:
+        alpha_opt = a2
+    return alpha_opt
+    
+    
+def sqp(f,g,x_start,settings):
+    """Performs Sequntial Quadratic Programming on a constrained optimization function."""
+    
+    # Initialization
+    iter = 0
+    o_iter = 0
+    n_vars = len(x_start)
+    n_cstr = settings.n_cstr
+    n_ineq_cstr = settings.n_ineq_cstr
+    
+    x0 = np.copy(x_start)
+    mag_dx = 1
+    
+    # Start outer iteration
+    while iter < settings.max_iterations and mag_dx > settings.termination_tol:
+        if settings.verbose: print("Setting Lagrangian Hessian to the identity matrix.")
+        o_iter += 1
+        i_iter = 1
+        iter += 1
 
-    # Evaluate the function at each design point
-    obj_fcn_values = [obj_fcn0] + obj_model.evaluate(design_points)
+        # Create quadratic approximation
+        f0,del_f0,g0,del_g0 = get_quad_approx(x0,f,g,n_vars,n_cstr)
+        del_2_L0 = np.eye(n_vars)
+        append_file(iter,o_iter,i_iter,f0,mag_dx,mag_dx,x0,del_f0,settings,g=g0,del_g=del_g0)
+            
+        # Estimate initial penalty function
+        P0 = f0
+        for constr in g0:
+            if constr < 0:
+                P0 -= constr
+
+        # Get step
+        delta_x,l,x1,f1,g1,P2 = get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,del_2_L0,del_f0,del_g0,g0,settings)
+        
+        mag_dx = np.linalg.norm(delta_x)
+        
+        # Start inner iteration
+        while mag_dx > settings.termination_tol:
+            iter += 1
+            i_iter += 1
+        
+            # Create quadratic approximation
+            f1,del_f1,g1,del_g1 = get_quad_approx(x1,f,g,n_vars,n_cstr)
+        
+            # Update the Lagrangian Hessain
+            del_2_L1 = get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x)
+
+            append_file(iter,o_iter,i_iter,f1,mag_dx,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
+        
+            # Get step
+            delta_x,l,x2,f2,g2,P2 = get_delta_x(x1,f0,f,g,P0,n_vars,n_cstr,del_2_L1,del_f1,del_g1,g1,settings)
+            
+            # Setup variables for next iterations
+            x0 = x1
+            x1 = x2
+            f0 = f1
+            del_f0 = del_f1
+            g0 = g1
+            del_g0 = del_g1
+            del_2_L0 = del_2_L1
+            P1 = P2
+            mag_dx = np.linalg.norm(delta_x)
+            
+            # End of inner loop
+        # End of outer loop
     
-    return alphas, obj_fcn_values
+    # Evaluate final case
+    f2 = f.f(x2)
+    del_f2 = f.del_f(x2)
+    g2 = np.zeros((n_cstr,1))
+    del_g2 = np.zeros((n_vars,n_cstr))
+    for i in range(n_cstr):
+        g2[i] = g[i].g(x2)
+        del_g2[:,i] = g[i].del_g(x2).flatten()
+    append_file(iter,o_iter,i_iter,f2,mag_dx,mag_dx,x2,del_f2,settings,g=g2,del_g=del_g2)
+    return c.OptimizerResult(f2,x2,True,"Optimizer exitted normally.",iter)
+
+
+def get_quad_approx(x0,f,g,n_vars,n_cstr):
+    f0 = f.f(x0)
+    del_f0 = f.del_f(x0)
+    g0 = np.zeros(n_cstr)
+    del_g0 = np.zeros((n_vars,n_cstr))
+    for i in range(n_cstr):
+        g0[i] = g[i].g(x0)
+        del_g0[:,i] = g[i].del_g(x0).flatten()
+    return f0,del_f0,g0,del_g0
+
+
+def get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x):
+    del_L0 = np.copy(del_f0)
+    del_L1 = np.copy(del_f1)
+    for i in range(n_cstr):
+        del_L0 -= np.asscalar(l[i])*np.reshape(del_g0[:,i],(n_vars,1))
+        del_L1 -= np.asscalar(l[i])*np.reshape(del_g1[:,i],(n_vars,1))
+    gamma_0 = np.matrix(del_L1-del_L0)
+    first = gamma_0*gamma_0.T/(gamma_0.T*np.matrix(delta_x))
+    second = del_2_L0*(np.matrix(delta_x)*np.matrix(delta_x).T)*del_2_L0/(np.matrix(delta_x).T*del_2_L0*np.matrix(delta_x))
+    return np.asarray(del_2_L0+first-second)
+
+
+def get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,del_2_L0,del_f0,del_g0,g0,settings):
+    # Solve for delta_x and lambda, at first assuming no constraints are binding and updating from there.
+    iterate = True
+    cstr_b = np.ones(n_cstr,dtype=bool)
+    while iterate:
+        print(cstr_b)
+        iterate = False # By default, the loop will be exitted after one iteration
+
+        n_bind = np.asscalar(sum(cstr_b)) # Number of binding constraints
+
+        # Create linear system to solve for delta_x and lambda
+        A = np.zeros((n_vars+n_bind,n_vars+n_bind))
+        b = np.zeros((n_vars+n_bind,1))
+        A[:n_vars,:n_vars] = del_2_L0
+        A[:n_vars,n_vars:] = -del_g0[:,cstr_b]
+        A[n_vars:,:n_vars] = del_g0[:,cstr_b].T
+        b[:n_vars] = -del_f0
+        b[n_vars:] = np.reshape(-g0[cstr_b],(n_bind,1))
+        
+        # Solve system and parse solution
+        x_lambda = np.linalg.solve(A,b)
+        delta_x = x_lambda[0:n_vars]
+        l_sol = x_lambda[n_vars:]
+        l = np.zeros((n_cstr,1))
+        l[cstr_b] = l_sol
+
+        # Check for non-binding constraints
+        if (l<0).any():
+            iterate = True
+            cstr_b = (l>0).flatten()
+            continue
+
+        # Check for binding constraints
+        x1 = x0+delta_x
+        g1 = np.zeros(n_cstr)
+        for i in range(n_cstr):
+            g1[i] = g[i].g(x1)
+        for i in range(n_cstr):
+            if g1[i]<0 and not cstr_b[i]:
+                iterate = True
+                cstr_b[i] = True
+                break
+
+    # Check penalty function
+    x1 = x0+delta_x
+    f1 = f.f(x1)
+    P1 = f1
+    g1 = np.zeros(n_cstr)
+    for i in range(n_cstr):
+        g1[i] = g[i].g(x1)
+        P1 += l[i]*abs(g1[i])
     
-    
-def append_file(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx, design_point, gradient, settings):
-    msg = ('{0:4d}, {1:5d}, {2:5d}, {3: 20.13E}, {4: 20.13E}, {5: 20.13E}'
-        .format(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx))
+    # Cut back step if the penalty function has increased
+    while P1 > P0 and np.linalg.norm(delta_x) > settings.termination_tol:
+        if settings.verbose: print("Stepped too far! Cutting step in half.")
+        delta_x /= 2
+        x1 = x0+delta_x
+        f1 = f.f(x1)
+        P1 = f1
+        g1 = np.zeros(n_cstr)
+        for i in range(n_cstr):
+            g1[i] = g[i].g(x1)
+            P1 += l[i]*abs(g1[i])
+
+    return delta_x,l,x1,f1,g1,P1
+
+
+def append_file(iter,o_iter,i_iter,obj_fcn_value,alpha,mag_dx,design_point,gradient,settings,**kwargs):
+    g = kwargs.get("g")
+    del_g = kwargs.get("del_g")
+
+    msg = '{0:4d}, {1:5d}, {2:5d}, {3: 20.13E}, {4: 20.13E}, {5: 20.13E}'.format(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx)
     values_msg = msg
     for value in design_point:
-        values_msg = ('{0}, {1: 20.13E}'.format(values_msg, value))
+        values_msg = ('{0}, {1: 20.13E}'.format(values_msg, np.asscalar(value)))
+    if (g != None).any():
+        for cstr in g:
+            values_msg = ('{0}, {1: 20.13E}'.format(values_msg, np.asscalar(cstr)))
     print(values_msg)
     with open(settings.opt_file, 'a') as opt_file:
         print(values_msg, file = opt_file)
 
     grad_msg = msg
     for grad in gradient:
-        grad_msg = ('{0}, {1: 20.13E}'.format(grad_msg, grad))
+        grad_msg = ('{0}, {1: 20.13E}'.format(grad_msg, np.asscalar(grad)))
+    if (del_g != None).any():
+        for i in range(settings.n_cstr):
+            for j in range(len(design_point)):
+                grad_msg = ('{0}, {1: 20.13E}'.format(grad_msg, np.asscalar(del_g[j,i])))
     with open(settings.grad_file, 'a') as grad_file:
         print(grad_msg, file = grad_file)
 
+def printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings):
+    print("\nOptix.py from USU AeroLab\n")
+    
+    print('---------- Variables ----------')
+    print("Optimizing in {0} variables.".format(n_vars))
+    print("Initial guess:\n{0}".format(x_start))
+    if bounds != None:
+        print("Variable bounds:\n{0}".format(bounds))
+    print("")
+    
+    print('---------- Constraints ----------')
+    print('{0} total constraints'.format(n_cstr))
+    print('{0} inequality constraints'.format(n_ineq_cstr))
+    print('{0} equality constraints'.format(n_cstr-n_ineq_cstr))
+    print("")
 
-class quadratic(object):
-    """Class for fitting, evaluating, and interrogating quadratic functions
-
-    This class is used for fitting a quadratic function to a data set
-    evaluating the function at specific points, and determining the
-    characteristics of the function.
-    """
-    def __init__(self, x, y):
-        """
-        Construct a quadratic object from tabulated data.
-        Quadratic is of the form f(x) = ax^2 + bx + c
-
-        Inputs
-        ------
-        x = List of independent values
-        y = List of dependent values
-        """
-        super().__init__()
-
-        # Calculate the quadratic coefficients
-        x_sq = [xx**2 for xx in x]
-        A = np.vstack([x_sq, x, np.ones(len(x))]).T
-        self.a, self.b, self.c = np.linalg.lstsq(A, y)[0]
-        
-        # Calculate the coefficient of determination
-        f = [self.f(xx) for xx in x]
-        ssres = ((f - y)**2).sum()
-        sstot = ((y - y.mean())**2).sum()
-
-        if abs(sstot) < zero:
-            # Data points actually formed a horizontal line
-            self.rsq = 0.0
+    print('---------- Settings ----------')
+    print('            method: {0}'.format(settings.method))
+    print('     obj func args: {0}'.format(settings.args))
+    print('     default alpha: {0}'.format(settings.alpha_d))
+    print('    stopping delta: {0}'.format(settings.termination_tol))
+    print('     max processes: {0}'.format(settings.max_processes))
+    print(' dx (finite diffs): {0}'.format(settings.dx))
+    print('          file tag: {0}'.format(settings.file_tag))
+    print('           verbose: {0}'.format(settings.verbose))
+    if settings.use_finite_diff:
+        if settings.central_diff:
+            print('using central difference approximation')
         else:
-            self.rsq = 1 - ssres / sstot
+            print('using forward difference approximation')
+    print('')
 
 
-    def convex(self):
-        """
-        Test to see if the quadratic is convex (opens up).
-        """
-        # Convex has positive curvature (2nd derivative)
-        # f"(x) = 2a, so a > 0 corresponds to convex
-        return (self.a > 0)
+def plot_path(opt_filename):
+    x = []
+    with open(opt_filename,'r') as output_file:
+        output_reader = csv.reader(output_file,delimiter=',')
+        first = True
+        for row in output_reader:
+            if first:
+                first = False
+                continue
+            x.append([float(row[6]),float(row[7])])
+    
+    x = np.asarray(x)
 
-
-    def vertex(self):
-        """
-        Find the coordinates of the vertex
-        """
-        if self.a != 0.0:
-            # Find x where f'(x) = 2ax + b = 0
-            x = -0.5 * self.b / self.a
-            return (x, self.f(x))
-        else:
-            # Quadratic is actually a line, no minimum!
-            return (None, None)
-
-
-    def f(self, x):
-        """
-        Evaluate the quadratic function at x
-        """
-        if x is not None: return self.a * x**2 + self.b * x + self.c
-        else: return None
-
-
+    plt.plot(x[:,0],x[:,1],"gx-")
+    plt.xlabel("x0")
+    plt.ylabel("y0")
+    plt.title("Path of Optimization Algorithm")
+    plt.show()
