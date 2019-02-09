@@ -630,7 +630,7 @@ def append_file(iter,o_iter,i_iter,obj_fcn_value,alpha,mag_dx,design_point,gradi
     values_msg = msg
     for value in design_point:
         values_msg = ('{0}, {1: 20.13E}'.format(values_msg, np.asscalar(value)))
-    if (g != None).any():
+    if not g is None:
         for cstr in g:
             values_msg = ('{0}, {1: 20.13E}'.format(values_msg, np.asscalar(cstr)))
     print(values_msg)
@@ -640,7 +640,7 @@ def append_file(iter,o_iter,i_iter,obj_fcn_value,alpha,mag_dx,design_point,gradi
     grad_msg = msg
     for grad in gradient:
         grad_msg = ('{0}, {1: 20.13E}'.format(grad_msg, np.asscalar(grad)))
-    if (del_g != None).any():
+    if not del_g is None:
         for i in range(settings.n_cstr):
             for j in range(len(design_point)):
                 grad_msg = ('{0}, {1: 20.13E}'.format(grad_msg, np.asscalar(del_g[j,i])))
