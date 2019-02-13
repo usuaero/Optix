@@ -163,11 +163,6 @@ Inputs
     wolfe_curv(float,optional)
     -Value of c2 in the Wolfe conditions. Defaults to 0.9 for BGFS.
 
-    plot_path(bool,optional)
-    -If set to true, the path taken by the optimization, as well as constraints
-    and contours of the objective, will be plotted. Defaults to false. Will plot
-    in the first two variables specified.
-
 Output
 ------
 
