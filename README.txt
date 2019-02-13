@@ -22,8 +22,10 @@ mirror that of scipy.optimize. We continue working to improve the API and
 functionality of Optix. This README will always contain update information
 for using Optix.
 
-AS OF 2/9/2019 SQP AND GRG FUNCTIONALITY IN OPTIX ARE NOT AVAILABLE. QUASI-
+AS OF 2/9/2019 SQP, AND GRG FUNCTIONALITY IN OPTIX ARE NOT AVAILABLE. QUASI-
 NEWTON OPTIMIZATION USING BGFS UPDATES IS AVAILABLE.
+
+AS OF 2/9/2019, BOUNDS FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
 
 --------------------------------------------------------------------
 INTRODUCTION
@@ -184,11 +186,19 @@ Output
             How many calls were made to the objective function during optimization.
         cstr_calls(array-like(n_cstr),int)
             How many calls were made to each constraint function during optimization.
-        x_path(array-like)
-            Each x point considered in the evaluation, each column of the array being
-            each point. The number of columns will be equal to the number of iterations.
-        f_path(array-like)
-            The value of the objective function at each point in x_path.
+
+--------------------------------------------------------------------
+FILE OUTPUTS
+--------------------------------------------------------------------
+
+optix.py will also output results to 3 .txt files. These 3 files are named optimize, gradient,
+and evaluations, each appended with the user-specified file tag. The first two are written
+to during runtime. The last is written to only after successful completion of the optimization.
+Optimize mimics what is printed to the command line, giving information about the fitness,
+point in the design space, magnitude of steps, etc. Gradient gives information about the 
+objective and constraint gradients at each point in the optimization. Evaluations simply
+outputs the value of the objective function at each point considered during optimization,
+including points used to calculate finite differences.
 
 --------------------------------------------------------------------
 CONTACT

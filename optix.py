@@ -7,6 +7,7 @@ import multiprocessing
 import classes as c
 import csv
 import matplotlib.pyplot as plt
+import itertools
 
 np.set_printoptions(precision = 14)
 
@@ -133,11 +134,6 @@ def minimize(fun,x0,**kwargs):
         wolfe_curv(float,optional)
         -Value of c2 in the Wolfe conditions. Defaults to 0.9 for BGFS.
 
-        plot_path(bool,optional)
-        -If set to true, the path taken by the optimization, as well as constraints
-        and contours of the objective, will be plotted. Defaults to false. Will plot
-        in the first two variables specified.
-
     Output
     ------
 
@@ -156,25 +152,20 @@ def minimize(fun,x0,**kwargs):
                 How many calls were made to the objective function during optimization.
             cstr_calls(array-like(n_cstr),int)
                 How many calls were made to each constraint function during optimization.
-            x_path(array-like)
-                Each x point considered in the evaluation, each column of the array being
-                each point. The number of columns will be equal to the number of iterations.
-            f_path(array-like)
-                The value of the objective function at each point in x_path.
 
     """
 
     #Initialize settings
     settings = c.Settings(**kwargs)
 
-    #Initialize objective function
-    grad = kwargs.get("grad")
-    hess = kwargs.get("hess")
-    f = c.Objective(fun,settings,grad=grad,hess=hess)
-
     #Initialize design variables
     n_vars = len(x0)
     x_start = np.reshape(x0,(n_vars,1))
+
+    #Initialize objective function
+    grad = kwargs.get("grad")
+    hess = kwargs.get("hess")
+    f = c.Objective(fun,n_vars,settings,grad=grad,hess=hess)
 
     #Initialize constraints
     constraints = kwargs.get("constraints")
@@ -199,6 +190,9 @@ def minimize(fun,x0,**kwargs):
         g = None
         n_cstr = 0
         n_ineq_cstr = 0
+
+    if n_cstr-n_ineq_cstr > n_vars:
+        raise ValueError("The problem is overconstrained")
 
     settings.n_cstr = n_cstr
     settings.n_ineq_cstr = n_ineq_cstr
@@ -239,10 +233,9 @@ def minimize(fun,x0,**kwargs):
     for i in range(n_cstr):
         opt.cstr_calls.append(g[i].eval_calls.value)
 
-    # Plot path taken by the optimizer
-    if settings.plot_path:
-        plot_path(opt_filename)
-    
+    # Output all function evaluations
+    write_eval_file(f,n_vars,settings)
+
     # Run the final case
     return opt
 
@@ -432,6 +425,7 @@ def line_search(x0,f0,s,del_f0,f,settings):
 
 
 def find_opt_alpha(a,f_search,min_ind,settings):
+    # Quadratic method
     if settings.method == 'quadratic':
         q = quadratic(np.asarray(a),np.asarray(f_search))
         (alpha_opt,f_opt) = q.vertex()
@@ -486,7 +480,7 @@ def sqp(f,g,x_start,settings):
                 P0 -= constr
 
         # Get step
-        delta_x,l,x1,f1,g1,P2 = get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,del_2_L0,del_f0,del_g0,g0,settings)
+        delta_x,l,x1,f1,g1,P2 = get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L0,del_f0,del_g0,g0,settings)
         
         mag_dx = np.linalg.norm(delta_x)
         
@@ -504,7 +498,7 @@ def sqp(f,g,x_start,settings):
             append_file(iter,o_iter,i_iter,f1,mag_dx,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
         
             # Get step
-            delta_x,l,x2,f2,g2,P2 = get_delta_x(x1,f0,f,g,P0,n_vars,n_cstr,del_2_L1,del_f1,del_g1,g1,settings)
+            delta_x,l,x2,f2,g2,P2 = get_delta_x(x1,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L1,del_f1,del_g1,g1,settings)
             
             # Setup variables for next iterations
             x0 = x1
@@ -533,17 +527,18 @@ def sqp(f,g,x_start,settings):
 
 
 def get_quad_approx(x0,f,g,n_vars,n_cstr):
+    # Evaluate objective, constraints, and gradients at specified point
     f0 = f.f(x0)
     del_f0 = f.del_f(x0)
-    g0 = np.zeros(n_cstr)
+    g0 = eval_constr(g,x0)
     del_g0 = np.zeros((n_vars,n_cstr))
     for i in range(n_cstr):
-        g0[i] = g[i].g(x0)
         del_g0[:,i] = g[i].del_g(x0).flatten()
     return f0,del_f0,g0,del_g0
 
 
 def get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x):
+    # BGFS update for Lagrangian Hessian
     del_L0 = np.copy(del_f0)
     del_L1 = np.copy(del_f1)
     for i in range(n_cstr):
@@ -555,71 +550,77 @@ def get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x):
     return np.asarray(del_2_L0+first-second)
 
 
-def get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,del_2_L0,del_f0,del_g0,g0,settings):
-    # Solve for delta_x and lambda, at first assuming no constraints are binding and updating from there.
-    iterate = True
-    cstr_b = np.ones(n_cstr,dtype=bool)
-    while iterate:
-        print(cstr_b)
-        iterate = False # By default, the loop will be exitted after one iteration
+def get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L0,del_f0,del_g0,g0,settings):
+    # Solve for delta_x and lambda given each possible combination of binding/non-binding constraints
 
-        n_bind = np.asscalar(sum(cstr_b)) # Number of binding constraints
-
-        # Create linear system to solve for delta_x and lambda
-        A = np.zeros((n_vars+n_bind,n_vars+n_bind))
-        b = np.zeros((n_vars+n_bind,1))
-        A[:n_vars,:n_vars] = del_2_L0
-        A[:n_vars,n_vars:] = -del_g0[:,cstr_b]
-        A[n_vars:,:n_vars] = del_g0[:,cstr_b].T
-        b[:n_vars] = -del_f0
-        b[n_vars:] = np.reshape(-g0[cstr_b],(n_bind,1))
-        
-        # Solve system and parse solution
-        x_lambda = np.linalg.solve(A,b)
-        delta_x = x_lambda[0:n_vars]
-        l_sol = x_lambda[n_vars:]
-        l = np.zeros((n_cstr,1))
-        l[cstr_b] = l_sol
-
-        # Check for non-binding constraints
-        if (l<0).any():
-            iterate = True
-            cstr_b = (l>0).flatten()
+    # If a given combination has no negative Lagrangian multipliers corresponding to inequality constraints, the loop exits
+    # An equality constraint is always binding and its Lagrange multiplier my be any finite value
+    cstr_opts = [[True,False] for i in range(n_ineq_cstr)] + [[True] for i in range(n_ineq_cstr,n_cstr)]
+    poss_combos = np.array(list(itertools.product(*cstr_opts)))
+    for cstr_b in poss_combos:
+        if sum(cstr_b) > n_vars: # In n-dimensional space, only n constraints may be binding at a time
             continue
 
-        # Check for binding constraints
-        x1 = x0+delta_x
-        g1 = np.zeros(n_cstr)
-        for i in range(n_cstr):
-            g1[i] = g[i].g(x1)
-        for i in range(n_cstr):
-            if g1[i]<0 and not cstr_b[i]:
-                iterate = True
-                cstr_b[i] = True
-                break
+        delta_x, l = get_x_lambda(n_vars,n_cstr,del_2_L0,del_g0,del_f0,g0,cstr_b)
 
-    # Check penalty function
-    x1 = x0+delta_x
+        x1 = x0+delta_x
+        g1 = eval_constr(g,x1)
+        if (g1[np.where(l==0)[0]]<0).any(): # Do not allow non-binding constraints to be violated
+            continue
+
+        if not (l[:n_ineq_cstr]<0).any(): # Check for non-binding constraints
+            break
+    print(cstr_b)
+
+    # Check actual penalty function
     f1 = f.f(x1)
     P1 = f1
-    g1 = np.zeros(n_cstr)
     for i in range(n_cstr):
-        g1[i] = g[i].g(x1)
-        P1 += l[i]*abs(g1[i])
+        P1 += abs(l[i])*g1[i]
     
     # Cut back step if the penalty function has increased
     while P1 > P0 and np.linalg.norm(delta_x) > settings.termination_tol:
+        print(P1)
+        print(delta_x)
         if settings.verbose: print("Stepped too far! Cutting step in half.")
         delta_x /= 2
         x1 = x0+delta_x
         f1 = f.f(x1)
         P1 = f1
-        g1 = np.zeros(n_cstr)
+        g1 = eval_constr(g,x1)
         for i in range(n_cstr):
-            g1[i] = g[i].g(x1)
-            P1 += l[i]*abs(g1[i])
+            P1 += abs(l[i])*g1[i]
 
     return delta_x,l,x1,f1,g1,P1
+
+
+def get_x_lambda(n_vars,n_cstr,del_2_L0,del_g0,del_f0,g0,cstr_b):
+    n_bind = np.asscalar(sum(cstr_b)) # Number of binding constraints
+
+    # Create linear system to solve for delta_x and lambda
+    A = np.zeros((n_vars+n_bind,n_vars+n_bind))
+    b = np.zeros((n_vars+n_bind,1))
+    A[:n_vars,:n_vars] = del_2_L0
+    A[:n_vars,n_vars:] = -del_g0[:,cstr_b]
+    A[n_vars:,:n_vars] = del_g0[:,cstr_b].T
+    b[:n_vars] = -del_f0
+    b[n_vars:] = np.reshape(-g0[cstr_b],(n_bind,1))
+    
+    # Solve system and parse solution
+    x_lambda = np.linalg.solve(A,b)
+    delta_x = x_lambda[0:n_vars]
+    l_sol = x_lambda[n_vars:]
+    l = np.zeros((n_cstr,1))
+    l[cstr_b] = l_sol
+    return delta_x,l
+
+
+def eval_constr(g,x1):
+    n_cstr = len(g)
+    g1 = np.zeros(n_cstr)
+    for i in range(n_cstr):
+        g1[i] = g[i].g(x1)
+    return g1
 
 
 def append_file(iter,o_iter,i_iter,obj_fcn_value,alpha,mag_dx,design_point,gradient,settings,**kwargs):
@@ -680,21 +681,21 @@ def printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings):
     print('')
 
 
-def plot_path(opt_filename):
-    x = []
-    with open(opt_filename,'r') as output_file:
-        output_reader = csv.reader(output_file,delimiter=',')
-        first = True
-        for row in output_reader:
-            if first:
-                first = False
-                continue
-            x.append([float(row[6]),float(row[7])])
-    
-    x = np.asarray(x)
+def write_eval_file(f,n_vars,settings):
+    f_evals = np.frombuffer(f.f_points.get_obj())[:f.eval_calls.value]
+    x_evals = np.frombuffer(f.x_points.get_obj())[:f.eval_calls.value*n_vars].reshape((f.eval_calls.value,n_vars)).T
 
-    plt.plot(x[:,0],x[:,1],"gx-")
-    plt.xlabel("x0")
-    plt.ylabel("y0")
-    plt.title("Path of Optimization Algorithm")
-    plt.show()
+    eval_filename = "evaluations"+settings.file_tag+".txt"
+    
+    # Format header
+    eval_header = '{0:>20}'.format('f')
+    for i in range(n_vars):
+        eval_header += ', {0:>20}'.format('x'+str(i))
+    
+    with open(eval_filename, 'w') as eval_file:
+        print(eval_header,file=eval_file)
+        for i in range(f.eval_calls.value):
+            eval_row = '{0:>20}'.format(f_evals[i])
+            for j in range(n_vars):
+                eval_row += ', {0:>20}'.format(x_evals[j,i])
+            print(eval_row,file=eval_file)

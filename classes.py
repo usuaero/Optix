@@ -108,10 +108,14 @@ class Constraint:
 class Objective:
     """Class defining objective function"""
     eval_calls = mp.Value('i',0)
+    store_ind = mp.Value('i',0)
+    f_points = mp.Array('d',10000)
+    x_points = mp.Array('d',1000000)
 
-    def __init__(self,f,settings,**kwargs):
+    def __init__(self,f,n_vars,settings,**kwargs):
         self.args = settings.args
         self.fun = f
+        self.n_vars = n_vars
         self.gr = kwargs.get("grad")
         self.hess = kwargs.get("hess")
         self.central_diff = settings.central_diff
@@ -119,9 +123,19 @@ class Objective:
         self.dx = settings.dx
 
     def f(self,x):
+        n = len(x)
+        f_val = np.asscalar(self.fun(x,*self.args))
         with self.eval_calls.get_lock():
             self.eval_calls.value += 1
-        return np.asscalar(self.fun(x,*self.args))
+        with self.store_ind.get_lock():
+            with self.f_points.get_lock():
+                fs = np.frombuffer(self.f_points.get_obj())
+                fs[self.store_ind.value] = f_val
+            with self.x_points.get_lock():
+                xs = np.frombuffer(self.x_points.get_obj())
+                xs[self.store_ind.value*n:(self.store_ind.value+1)*n] = x.flatten()
+            self.store_ind.value += 1
+        return f_val
 
     def del_f(self,x):
         if self.gr == None:
