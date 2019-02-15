@@ -47,13 +47,13 @@ class Settings:
         self.file_tag = kwargs.get("file_tag","")
         self.max_processes = kwargs.get("max_processes",1)
         self.dx = kwargs.get("dx",0.001)
-        self.alpha_d = kwargs.get("default_alpha",1)
-        self.search_type = kwargs.get("line_search","bracket")
         self.n_search = kwargs.get("n_search",8)
+        self.alpha_d = kwargs.get("default_alpha",1)
+        self.alpha_mult = kwargs.get("alpha_mult",self.n_search/2.0)
+        self.search_type = kwargs.get("line_search","bracket")
         self.max_iterations = kwargs.get("max_iterations",np.inf)
         self.wolfe_armijo = kwargs.get("wolfe_armijo",1e-4)
         self.wolfe_curv = kwargs.get("wolfe_curv",0.9)
-        self.plot_path = kwargs.get("plot_path",False)
 
         self.use_finite_diff = grad == None
 

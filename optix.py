@@ -112,6 +112,10 @@ def minimize(fun,x0,**kwargs):
         default_alpha(float,optional)
         - Initial step size to be used in the line search. Defaults to 1.
 
+        alpha_mult(float,optionatl)
+        - Factor by which alpha is adjusted during each iteration of the line
+        search. Defaults to n_search/2.
+
         line_search(string,optional)
         - Specifies which type of line search should be conducted in the search
         direction. The following types are possible:
@@ -366,7 +370,6 @@ def line_search(x0,f0,s,del_f0,f,settings):
         print('line search ----------------------------------------------------------------------------')
 
     alpha = np.float(np.copy(settings.alpha_d))
-    alpha_mult = settings.n_search/2.0
 
     while True:
         x_search = [x0+s*alpha*i for i in range(1,settings.n_search+1)]
@@ -403,10 +406,10 @@ def line_search(x0,f0,s,del_f0,f,settings):
         min_ind = f_search.index(min(f_search))
         if min_ind == 0:
             if settings.verbose: print('Too big of a step. Reducing alpha')
-            alpha /= alpha_mult
+            alpha /= settings.alpha_mult
         elif min_ind == settings.n_search:
             if settings.verbose: print('Too small of a step. Increasing alpha')
-            alpha *= alpha_mult
+            alpha *= settings.alpha_mult
         else:
             break
     
@@ -577,7 +580,8 @@ def get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L0,del_f0,del_g0,g0
     P1 = f1
     for i in range(n_cstr):
         P1 += abs(l[i])*g1[i]
-    
+#TODO somehow update lambda when we step back past a constraint boundary
+
     # Cut back step if the penalty function has increased
     while P1 > P0 and np.linalg.norm(delta_x) > settings.termination_tol:
         print(P1)
@@ -588,6 +592,7 @@ def get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L0,del_f0,del_g0,g0
         f1 = f.f(x1)
         P1 = f1
         g1 = eval_constr(g,x1)
+        print(g1)
         for i in range(n_cstr):
             P1 += abs(l[i])*g1[i]
 
