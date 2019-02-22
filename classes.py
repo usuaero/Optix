@@ -93,6 +93,8 @@ class Constraint:
         self.central_diff = settings.central_diff
         self.max_processes = settings.max_processes
         self.dx = settings.dx
+        with self.eval_calls.get_lock():
+            self.eval_calls.value = 0
         
     def g(self,x):
         with self.eval_calls.get_lock():
@@ -121,6 +123,10 @@ class Objective:
         self.central_diff = settings.central_diff
         self.max_processes = settings.max_processes
         self.dx = settings.dx
+        with self.eval_calls.get_lock():
+            self.eval_calls.value = 0
+        with self.store_ind.get_lock():
+            self.store_ind.value = 0
 
     def f(self,x):
         n = len(x)

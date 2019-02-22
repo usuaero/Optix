@@ -22,10 +22,9 @@ mirror that of scipy.optimize. We continue working to improve the API and
 functionality of Optix. This README will always contain update information
 for using Optix.
 
-AS OF 2/9/2019 SQP, AND GRG FUNCTIONALITY IN OPTIX ARE NOT AVAILABLE. QUASI-
-NEWTON OPTIMIZATION USING BGFS UPDATES IS AVAILABLE.
+AS OF 2/22/2019 GRG FUNCTIONALITY IN OPTIX ARE NOT AVAILABLE.
 
-AS OF 2/9/2019, BOUNDS FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
+AS OF 2/22/2019, BOUNDS FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
 
 --------------------------------------------------------------------
 INTRODUCTION
@@ -53,7 +52,9 @@ Inputs
     def fun(x,*args):
         return float
     where x is a vector of the design variables and *args is all
-    other parameters necessary for calling the function.
+    other parameters necessary for calling the function. Note that
+    Optix will handle x as a column vector (i.e. shape(n_vars,1)).
+    This should be taken into consideration when writing fun().
 
     x0(array-like,shape(n,))
     - A starting guess for the independent variables. May be
@@ -122,7 +123,7 @@ Inputs
 
     cent_diff(bool,optional)
     - Flag for setting finite-difference approximation method. If set
-    to false, a forward-difference approximation will be used. Otherwise
+    to false, a forward-difference approximation will be used. Otherwise,
     defaults to a central-difference.
 
     file_tag(str,optional)
@@ -139,7 +140,8 @@ Inputs
     - Step size to be used in finite difference methods. Defaults to 0.001
 
     default_alpha(float,optional)
-    - Initial step size to be used in the line search. Defaults to 1.
+    - Initial step size to be used in the line search. Defaults to 10 times dx.
+    Not defined for SQP.
 
     line_search(string,optional)
     - Specifies which type of line search should be conducted in the search
