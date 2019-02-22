@@ -107,14 +107,15 @@ def minimize(fun,x0,**kwargs):
         to 1.
 
         dx(float,optional)
-        - Step size to be used in finite difference methods. Defaults to 0.001
+        - Step size to be used in finite difference methods. Defaults to 0.01
 
         default_alpha(float,optional)
-        - Initial step size to be used in the line search. Defaults to 1.
+        - Initial step size to be used in the line search. Defaults to 10 times dx.
+        Not defined for SQP.
 
         alpha_mult(float,optionatl)
         - Factor by which alpha is adjusted during each iteration of the line
-        search. Defaults to n_search/2.
+        search. Defaults to n_search/2. Not defined for SQP.
 
         line_search(string,optional)
         - Specifies which type of line search should be conducted in the search
@@ -472,28 +473,33 @@ def sqp(f,g,x_start,settings):
         iter += 1
 
         # Create quadratic approximation
-        f0,del_f0,g0,del_g0 = get_quad_approx(x0,f,g,n_vars,n_cstr)
+        f0 = f.f(x0)
+        g0 = eval_constr(g,x0)
+        del_f0,del_g0 = eval_grad(x0,f,g,n_vars,n_cstr)
         del_2_L0 = np.eye(n_vars)
         append_file(iter,o_iter,i_iter,f0,mag_dx,mag_dx,x0,del_f0,settings,g=g0,del_g=del_g0)
             
         # Estimate initial penalty function
-        P0 = f0
+        P0 = np.copy(f0)
         for constr in g0:
             if constr < 0:
                 P0 -= constr
 
         # Get step
-        delta_x,l,x1,f1,g1,P2 = get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L0,del_f0,del_g0,g0,settings)
+        delta_x,l,x1,f1,g1,P1 = get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L0,del_f0,del_g0,g0,settings)
         
         mag_dx = np.linalg.norm(delta_x)
+
+        first = True
         
         # Start inner iteration
-        while mag_dx > settings.termination_tol:
+        while first or mag_dx > settings.termination_tol:
+            first = False
             iter += 1
             i_iter += 1
         
             # Create quadratic approximation
-            f1,del_f1,g1,del_g1 = get_quad_approx(x1,f,g,n_vars,n_cstr)
+            del_f1,del_g1 = eval_grad(x1,f,g,n_vars,n_cstr)
         
             # Update the Lagrangian Hessain
             del_2_L1 = get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x)
@@ -501,43 +507,47 @@ def sqp(f,g,x_start,settings):
             append_file(iter,o_iter,i_iter,f1,mag_dx,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
         
             # Get step
-            delta_x,l,x2,f2,g2,P2 = get_delta_x(x1,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L1,del_f1,del_g1,g1,settings)
-            
+            delta_x,l,x2,f2,g2,P2 = get_delta_x(x1,f1,f,g,P1,n_vars,n_cstr,n_ineq_cstr,del_2_L1,del_f1,del_g1,g1,settings)
+
             # Setup variables for next iterations
             x0 = x1
             x1 = x2
             f0 = f1
+            f1 = f2
             del_f0 = del_f1
             g0 = g1
+            g1 = g2
             del_g0 = del_g1
             del_2_L0 = del_2_L1
             P1 = P2
             mag_dx = np.linalg.norm(delta_x)
+
+            if mag_dx<settings.termination_tol and P2>f2: # The algorithm thinks it's found an optimum when it hasn't
+                if settings.verbose: print("Stuck at optimum outside of feasible space. Resetting BGFS update.")
+                mag_dx = 1
+                break # Reset BGFS
             
             # End of inner loop
         # End of outer loop
     
     # Evaluate final case
-    f2 = f.f(x2)
-    del_f2 = f.del_f(x2)
-    g2 = np.zeros((n_cstr,1))
-    del_g2 = np.zeros((n_vars,n_cstr))
+    iter += 1
+    i_iter += 1
+    del_f1 = f.del_f(x1)
+    del_g1 = np.zeros((n_vars,n_cstr))
     for i in range(n_cstr):
-        g2[i] = g[i].g(x2)
-        del_g2[:,i] = g[i].del_g(x2).flatten()
-    append_file(iter,o_iter,i_iter,f2,mag_dx,mag_dx,x2,del_f2,settings,g=g2,del_g=del_g2)
+        del_g1[:,i] = g[i].del_g(x1).flatten()
+    append_file(iter,o_iter,i_iter,f1,mag_dx,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
     return c.OptimizerResult(f2,x2,True,"Optimizer exitted normally.",iter)
 
 
-def get_quad_approx(x0,f,g,n_vars,n_cstr):
-    # Evaluate objective, constraints, and gradients at specified point
-    f0 = f.f(x0)
+def eval_grad(x0,f,g,n_vars,n_cstr):
+    # Evaluate gradients at specified point
     del_f0 = f.del_f(x0)
-    g0 = eval_constr(g,x0)
     del_g0 = np.zeros((n_vars,n_cstr))
     for i in range(n_cstr):
         del_g0[:,i] = g[i].del_g(x0).flatten()
-    return f0,del_f0,g0,del_g0
+    return del_f0,del_g0
 
 
 def get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x):
@@ -556,45 +566,80 @@ def get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x):
 def get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L0,del_f0,del_g0,g0,settings):
     # Solve for delta_x and lambda given each possible combination of binding/non-binding constraints
 
-    # If a given combination has no negative Lagrangian multipliers corresponding to inequality constraints, the loop exits
-    # An equality constraint is always binding and its Lagrange multiplier my be any finite value
+    # If a given combination has no negative Lagrangian multipliers corresponding to inequality constraints, the loop exits.
+    # An equality constraint is always binding and its Lagrange multiplier my be any value.
     cstr_opts = [[True,False] for i in range(n_ineq_cstr)] + [[True] for i in range(n_ineq_cstr,n_cstr)]
     poss_combos = np.array(list(itertools.product(*cstr_opts)))
     for cstr_b in poss_combos:
-        if sum(cstr_b) > n_vars: # In n-dimensional space, only n constraints may be binding at a time
+
+        if sum(cstr_b)>n_vars: # At most, n constraints may be binding in n-dimensional space.
             continue
+
+        if sum(cstr_b)>1:
+            _,s,_ = np.linalg.svd(del_g0[:,cstr_b].T) # Check linear independence of constraint gradients.
+            if (abs(s)<1e-14).any():
+                continue
 
         delta_x, l = get_x_lambda(n_vars,n_cstr,del_2_L0,del_g0,del_f0,g0,cstr_b)
 
         x1 = x0+delta_x
         g1 = eval_constr(g,x1)
-        if (g1[np.where(l==0)[0]]<0).any(): # Do not allow non-binding constraints to be violated
+        if (g1[cstr_b==False]<0).any(): # Do not allow non-binding constraints to be violated.
             continue
 
-        if not (l[:n_ineq_cstr]<0).any(): # Check for non-binding constraints
+        # Check if constraints assumed to be binding are actually non-binding.
+        if not (l[:n_ineq_cstr].flatten()<0).any():
+            if settings.verbose: print("Optimal combination found.")
             break
-    print(cstr_b)
+    else:
+        # If an optimal combination is not found, relax the conditions by allowing non-binding constraints to be violated.
+        if settings.verbose: print("Optimal combination not found. Allowing non-binding constraints to be violated.")
+        for cstr_b in poss_combos:
 
-    # Check actual penalty function
+            if sum(cstr_b)>n_vars: # At most, n constraints may be binding in n-dimensional space.
+                continue
+
+            if sum(cstr_b)>1:
+                _,s,_ = np.linalg.svd(del_g0[:,cstr_b].T) # Check linear independence of constraint gradients.
+                if (abs(s)<1e-14).any():
+                    continue
+
+            delta_x, l = get_x_lambda(n_vars,n_cstr,del_2_L0,del_g0,del_f0,g0,cstr_b)
+
+            x1 = x0+delta_x
+            g1 = eval_constr(g,x1)
+
+            # Check if constraints assumed to be binding are actually non-binding.
+            if not (l[:n_ineq_cstr].flatten()<0).any():
+                if settings.verbose: print("Optimal combination found.")
+                break
+
+    if settings.verbose: print("Optimal combination of binding constraints: {0}".format(cstr_b))
+
+    # Check penalty function at proposed optimum
     f1 = f.f(x1)
-    P1 = f1
+    P1 = np.copy(f1)
     for i in range(n_cstr):
-        P1 += abs(l[i])*g1[i]
-#TODO somehow update lambda when we step back past a constraint boundary
+        P1 += np.asscalar(abs(l[i])*abs(g1[i]))
+    if settings.verbose: print("Objective: {0}, Penalty: {1}".format(f1,P1))
 
     # Cut back step if the penalty function has increased
     while P1 > P0 and np.linalg.norm(delta_x) > settings.termination_tol:
-        print(P1)
-        print(delta_x)
         if settings.verbose: print("Stepped too far! Cutting step in half.")
         delta_x /= 2
         x1 = x0+delta_x
         f1 = f.f(x1)
-        P1 = f1
+        P1 = np.copy(f1)
         g1 = eval_constr(g,x1)
-        print(g1)
         for i in range(n_cstr):
-            P1 += abs(l[i])*g1[i]
+            if i<n_ineq_cstr:
+                if g1[i]>0: # We may have stepped back across a constraint, meaning it should no longer affect the penalty function
+                    continue
+                elif l[i]==0 and g1[i]<0: # We may have started violating a new constraint
+                    P1 += abs(g1[i])
+                    continue
+            P1 += np.asscalar(abs(l[i])*abs(g1[i]))
+        if settings.verbose: print("Objective: {0}, Penalty: {1}".format(f1,P1))
 
     return delta_x,l,x1,f1,g1,P1
 
