@@ -3,7 +3,7 @@ import numpy as np
 import os
 import shutil
 import time
-import multiprocessing
+import multiprocessing as mp
 import classes as c
 import csv
 import matplotlib.pyplot as plt
@@ -167,79 +167,90 @@ def minimize(fun,x0,**kwargs):
     n_vars = len(x0)
     x_start = np.reshape(x0,(n_vars,1))
 
-    #Initialize objective function
-    grad = kwargs.get("grad")
-    hess = kwargs.get("hess")
-    f = c.Objective(fun,n_vars,settings,grad=grad,hess=hess)
+    #Initialize multiprocessing
+    with mp.Pool(settings.max_processes) as pool:
+        manager = mp.Manager()
+        queue = manager.Queue()
 
-    #Initialize constraints
-    constraints = kwargs.get("constraints")
-    if constraints != None:
-        n_cstr = len(constraints)
-        n_ineq_cstr = 0
-        g = []
-        # Inequality constraints are stored first
-        for constraint in constraints:
-            if constraint["type"] == "ineq":
-                n_ineq_cstr += 1
-                grad = constraint.get("grad")
-                constr = c.Constraint(constraint["type"],constraint["fun"],settings,grad=grad)
-                g.append(constr)
-        for constraint in constraints:
-            if constraint["type"] == "eq":
-                grad = constraint.get("grad")
-                constr = c.Constraint(constraint["type"],constraint["fun"],settings,grad=grad)
-                g.append(constr)
-        g = np.array(g)
-    else:
-        g = None
-        n_cstr = 0
-        n_ineq_cstr = 0
+        #Initialize objective function
+        grad = kwargs.get("grad")
+        hess = kwargs.get("hess")
+        f = c.Objective(fun,pool,queue,settings,grad=grad,hess=hess)
 
-    if n_cstr-n_ineq_cstr > n_vars:
-        raise ValueError("The problem is overconstrained")
+        #Initialize constraints
+        constraints = kwargs.get("constraints")
+        if constraints != None:
+            n_cstr = len(constraints)
+            n_ineq_cstr = 0
+            g = []
+            # Inequality constraints are stored first
+            for constraint in constraints:
+                if constraint["type"] == "ineq":
+                    n_ineq_cstr += 1
+                    grad = constraint.get("grad")
+                    constr = c.Constraint(constraint["type"],constraint["fun"],pool,queue,settings,grad=grad)
+                    g.append(constr)
+            for constraint in constraints:
+                if constraint["type"] == "eq":
+                    grad = constraint.get("grad")
+                    constr = c.Constraint(constraint["type"],constraint["fun"],pool,queue,settings,grad=grad)
+                    g.append(constr)
+            g = np.array(g)
+        else:
+            g = None
+            n_cstr = 0
+            n_ineq_cstr = 0
 
-    settings.n_cstr = n_cstr
-    settings.n_ineq_cstr = n_ineq_cstr
-    bounds = kwargs.get("bounds")
+        if n_cstr-n_ineq_cstr > n_vars:
+            raise ValueError("The problem is overconstrained")
 
-    #Begin formatting of output files
-    opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
-    for i in range(n_vars):
-        opt_header += ', {0:>20}'.format('x'+str(i))
-    for i in range(n_cstr):
-        opt_header += ', {0:>20}'.format('g'+str(i))
+        settings.n_cstr = n_cstr
+        settings.n_ineq_cstr = n_ineq_cstr
+        bounds = kwargs.get("bounds")
 
-    opt_filename = "optimize"+settings.file_tag+".txt"
-    settings.opt_file = opt_filename
-    with open(opt_filename, 'w') as opt_file:
-        opt_file.write(opt_header + '\n')
-
-    grad_header = '{0:>84}  {1:>20}'.format(' ','df')
-    for i in range(n_cstr):
-        grad_header += (', {0:>'+str(21*n_vars)+'}').format('dg'+str(i))
-    grad_header += '\n{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
-    for j in range(n_cstr+1):
+        #Begin formatting of output files
+        opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
         for i in range(n_vars):
-            grad_header += ', {0:>20}'.format('dx'+str(i))
-    
-    grad_filename = "gradient"+settings.file_tag+".txt"
-    settings.grad_file = grad_filename
-    with open(grad_filename, 'w') as grad_file:
-        grad_file.write(grad_header + '\n')
+            opt_header += ', {0:>20}'.format('x'+str(i))
+        for i in range(n_cstr):
+            opt_header += ', {0:>20}'.format('g'+str(i))
 
-    #Print setup information to command line
-    printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings)
-    print(opt_header)
+        opt_filename = "optimize"+settings.file_tag+".txt"
+        settings.opt_file = opt_filename
+        with open(opt_filename, 'w') as opt_file:
+            opt_file.write(opt_header + '\n')
 
-    # Drive to the minimum
-    opt = find_minimum(f,g,x_start,settings)
-    opt.obj_calls = f.eval_calls.value
-    for i in range(n_cstr):
-        opt.cstr_calls.append(g[i].eval_calls.value)
+        grad_header = '{0:>84}  {1:>20}'.format(' ','df')
+        for i in range(n_cstr):
+            grad_header += (', {0:>'+str(21*n_vars)+'}').format('dg'+str(i))
+        grad_header += '\n{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
+        for j in range(n_cstr+1):
+            for i in range(n_vars):
+                grad_header += ', {0:>20}'.format('dx'+str(i))
+        
+        grad_filename = "gradient"+settings.file_tag+".txt"
+        settings.grad_file = grad_filename
+        with open(grad_filename, 'w') as grad_file:
+            grad_file.write(grad_header + '\n')
 
-    # Output all function evaluations
-    write_eval_file(f,n_vars,settings)
+        eval_header = '{0:>20}'.format('f')
+        for i in range(n_vars):
+            eval_header += ', {0:>20}'.format('x'+str(i))
+        eval_filename = "evaluations"+settings.file_tag+".txt"
+        writer = pool.apply_async(eval_write,(eval_filename,eval_header,queue))
+
+        #Print setup information to command line
+        printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings)
+        print(opt_header)
+
+        # Drive to the minimum
+        opt = find_minimum(f,g,x_start,settings)
+        opt.obj_calls = f.eval_calls.value
+        for i in range(n_cstr):
+            opt.cstr_calls.append(g[i].eval_calls.value)
+
+        #Finalize multiprocessing
+        queue.put('kill')
 
     # Run the final case
     return opt
@@ -374,7 +385,7 @@ def line_search(x0,f0,s,del_f0,f,settings):
 
     while True:
         x_search = [x0+s*alpha*i for i in range(1,settings.n_search+1)]
-        with multiprocessing.Pool(processes=settings.max_processes) as pool:
+        with mp.Pool(processes=settings.max_processes) as pool:
             f_search = pool.map(f.f,x_search)
         x_search = [x0]+x_search
         f_search = [f0]+f_search
@@ -730,22 +741,12 @@ def printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings):
             print('using forward difference approximation')
     print('')
 
-
-def write_eval_file(f,n_vars,settings):
-    f_evals = np.frombuffer(f.f_points.get_obj())[:f.eval_calls.value]
-    x_evals = np.frombuffer(f.x_points.get_obj())[:f.eval_calls.value*n_vars].reshape((f.eval_calls.value,n_vars)).T
-
-    eval_filename = "evaluations"+settings.file_tag+".txt"
-    
-    # Format header
-    eval_header = '{0:>20}'.format('f')
-    for i in range(n_vars):
-        eval_header += ', {0:>20}'.format('x'+str(i))
-    
-    with open(eval_filename, 'w') as eval_file:
-        print(eval_header,file=eval_file)
-        for i in range(f.eval_calls.value):
-            eval_row = '{0:>20}'.format(f_evals[i])
-            for j in range(n_vars):
-                eval_row += ', {0:>20}'.format(x_evals[j,i])
-            print(eval_row,file=eval_file)
+def eval_write(args):
+    filename,header,q = args
+    with open(filename,'w') as f:
+        f.write(header+"\n")
+        while True:
+            msg = q.get()
+            if msg=='kill':
+                break
+            f.write(msg+"\n")

@@ -5,7 +5,7 @@ import shutil
 import time
 import multiprocessing as mp
 
-def grad(f,x,dx,central,max_processes):
+def grad(f,x,dx,central,pool):
     n = len(x)
 
     if central:
@@ -23,8 +23,7 @@ def grad(f,x,dx,central,max_processes):
             argslist.append(x+dx_v)
         argslist.append(x)
 
-    with mp.Pool(processes=max_processes) as pool:
-        results = pool.map(f,argslist)
+    results = pool.map(f,argslist)
 
     gradient = np.zeros((n,1))
     if central:
@@ -85,7 +84,7 @@ class Constraint:
     """Class defining a constraint"""
     eval_calls = mp.Value('i',0)
     
-    def __init__(self,cstr_type,f,settings,**kwargs):
+    def __init__(self,cstr_type,f,pool,queue,settings,**kwargs):
         self.args = kwargs.get("args",())
         self.type = cstr_type
         self.fun = f
@@ -93,6 +92,8 @@ class Constraint:
         self.central_diff = settings.central_diff
         self.max_processes = settings.max_processes
         self.dx = settings.dx
+        self.pool = pool
+        self.queue = queue
         with self.eval_calls.get_lock():
             self.eval_calls.value = 0
         
@@ -103,51 +104,59 @@ class Constraint:
 
     def del_g(self,x):
         if self.gr == None:
-            return grad(self.g,x,self.dx,self.central_diff,self.max_processes)
+            return grad(self.g,x,self.dx,self.central_diff,self.pool)
         else:
             return self.gr(x)
+
+    def __getstate__(self):
+        self_dict = self.__dict__.copy()
+        del self_dict['pool']
+        return self_dict
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
 class Objective:
     """Class defining objective function"""
     eval_calls = mp.Value('i',0)
-    store_ind = mp.Value('i',0)
-    f_points = mp.Array('d',10000)
-    x_points = mp.Array('d',1000000)
 
-    def __init__(self,f,n_vars,settings,**kwargs):
+    def __init__(self,f,pool,queue,settings,**kwargs):
         self.args = settings.args
         self.fun = f
-        self.n_vars = n_vars
         self.gr = kwargs.get("grad")
         self.hess = kwargs.get("hess")
         self.central_diff = settings.central_diff
         self.max_processes = settings.max_processes
         self.dx = settings.dx
+        self.pool = pool
+        self.queue = queue
         with self.eval_calls.get_lock():
             self.eval_calls.value = 0
-        with self.store_ind.get_lock():
-            self.store_ind.value = 0
 
     def f(self,x):
         n = len(x)
         f_val = np.asscalar(self.fun(x,*self.args))
         with self.eval_calls.get_lock():
             self.eval_calls.value += 1
-        with self.store_ind.get_lock():
-            with self.f_points.get_lock():
-                fs = np.frombuffer(self.f_points.get_obj())
-                fs[self.store_ind.value] = f_val
-            with self.x_points.get_lock():
-                xs = np.frombuffer(self.x_points.get_obj())
-                xs[self.store_ind.value*n:(self.store_ind.value+1)*n] = x.flatten()
-            self.store_ind.value += 1
+        msg = "{0:>20}".format(f_val)
+        for value in x:
+            msg += ", {0:>20}".format(np.asscalar(value))
+        self.queue.put(msg)
         return f_val
 
     def del_f(self,x):
         if self.gr == None:
-            return grad(self.f,x,self.dx,self.central_diff,self.max_processes)
+            return grad(self.f,x,self.dx,self.central_diff,self.pool)
         else:
             return self.gr(x)
+
+    def __getstate__(self):
+        self_dict = self.__dict__.copy()
+        del self_dict['pool']
+        return self_dict
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
 
 class quadratic(object):
