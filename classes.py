@@ -41,14 +41,15 @@ class Settings:
         self.args = kwargs.get("args",())
         self.method = kwargs.get("method")
         self.termination_tol = kwargs.get("termination_tol",1e-12)
+        self.grad_tol = kwargs.get("grad_tol",1e-12)
         self.verbose = kwargs.get("verbose",False)
         self.central_diff = kwargs.get("central_diff",True)
         self.file_tag = kwargs.get("file_tag","")
         self.max_processes = kwargs.get("max_processes",1)
         self.dx = kwargs.get("dx",0.01)
         self.n_search = kwargs.get("n_search",8)
-        self.alpha_d = kwargs.get("default_alpha",self.dx*10)
-        self.alpha_mult = kwargs.get("alpha_mult",self.n_search/2.0)
+        self.alpha_d = kwargs.get("default_alpha",None)
+        self.alpha_mult = kwargs.get("alpha_mult",self.n_search)
         self.search_type = kwargs.get("line_search","bracket")
         self.max_iterations = kwargs.get("max_iterations",np.inf)
         self.wolfe_armijo = kwargs.get("wolfe_armijo",1e-4)
@@ -63,22 +64,22 @@ class Settings:
             if (bounds != None or constraints != None):
                 self.method = "sqp"
             else:
-                self.method = "bgfs"
+                self.method = "bfgs"
 
         #Check for issues
         if self.method == "bgfs" and (bounds != None or constraints != None):
             raise ValueError("Bounds or constraints may not be specified for the simple BGFS algorithm.")
 
 class OptimizerResult:
-    obj_calls = 0
-    cstr_calls = []
 
-    def __init__(self,f,x,success,message,iterations):
+    def __init__(self,f,x,success,message,iterations,obj_calls,cstr_calls=[]):
         self.f = f
         self.x = x
         self.success = success
         self.message = message
         self.total_iter = iterations
+        self.obj_calls = obj_calls
+        self.cstr_calls = cstr_calls
 
 class Constraint:
     """Class defining a constraint"""

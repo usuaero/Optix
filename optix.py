@@ -14,151 +14,7 @@ np.set_printoptions(precision = 14)
 zero = 1.0e-20
 
 def minimize(fun,x0,**kwargs):
-    """Minimize a scalar function in one or more variables
-
-    Inputs
-    ------
-
-        fun(callable)
-        - Objective to be minimized. Must be a scalar function:
-        def fun(x,*args):
-            return float
-        where x is a vector of the design variables and *args is all
-        other parameters necessary for calling the function.
-
-        x0(array-like,shape(n,))
-        - A starting guess for the independent variables. May be
-        a list or numpy array. All variables must be represented as
-        minimize determines the number of variables from the length
-        of this vector.
-
-        args(tuple,optional)
-        - Arguments to be passed to the objective function.
-
-        method(str,optional)
-        - Method to be used by minimize to find the minimum of the
-        objective function. May be one of the following:
-            Unconstrained problem:
-                "bgfs" - quasi-Nexton with BGFS Hessian update
-            Constrained problem:
-                "sqp" - sequential quadratic programming
-                "grg" - generalized reduced gradient
-        If no method is specified, minimize will choose either "bgfs"
-        or "sqp", based on whether constraints were given.
-
-        grad(callable,optional)
-        - Returns the gradient of the objective function at a specified
-        point. Definition is the same as fun() but must return array-like,
-        shape(n,). If not specified, will be estimated using a finite-
-        difference approximation.
-
-        hess(callable,optional)
-        - Returns the Hessian of of the objective function at a specified
-        point. Definition is the same as fun() but must return array-like,
-        shape(n,n). If not specified, will be estimated using a finite-
-        difference approximation.
-        NOTE: bgfs, sqp, and grg do not require direct Hessian evaluations,
-        so this functionality is not defined at this time.
-
-        bounds(sequence of tuple,optional)
-        - Bounds on independent variables. Can only be used with constrained
-        methods. Should be a sequence of (min,max) pairs for each element in
-        x. Use -numpy.inf or numpy.inf to specify mo bound.
-
-        constraints(list of {Constraint,dict}, optional)
-        - Constraints on the design space. Can only be used with constrained
-        methods. Given as a list of dictionaries, each having the following
-        keys:
-            type (str)
-                Constraint type; either 'eq' for equality or 'ineq' for
-                inequality; equality means the constraint function must
-                equate to 0 and inequality means the constraint function
-                must be positive.
-            fun (callable)
-                Value of the constraint function. Must return a scalar. May 
-                only have one argument, being an array of the design variables.
-            grad (callable,optional)
-                Returns the gradient of the constraint function at a
-                specified point. Must return array-like, shape(n,). May
-                only have one argument, being an array of the design variables.
-
-        termination_tol(float,optional)
-        - Point at which the optimization will quit. Execution terminates
-        if the change in x for any step becomes less than the termination
-        tolerance. Defaults to 1e-12.
-
-        verbose(bool,optional)
-        - If set to true, extra information about each step of the
-        optimization will be printed to the command line.
-
-        cent_diff(bool,optional)
-        - Flag for setting finite-difference approximation method. If set
-        to false, a forward-difference approximation will be used. Otherwise
-        defaults to a central-difference.
-
-        file_tag(str,optional)
-        - Tag to be appended to the output filenames. If not specified,
-        output files will be overwritten each time minimize() is called.
-        Output files may still be overwritten if file_tag does not change
-        with each call.
-
-        max_processes(int,optional)
-        - Maximum number of processes to be used in multiprocessing. Defaults
-        to 1.
-
-        dx(float,optional)
-        - Step size to be used in finite difference methods. Defaults to 0.01
-
-        default_alpha(float,optional)
-        - Initial step size to be used in the line search. Defaults to 10 times dx.
-        Not defined for SQP.
-
-        alpha_mult(float,optionatl)
-        - Factor by which alpha is adjusted during each iteration of the line
-        search. Defaults to n_search/2. Not defined for SQP.
-
-        line_search(string,optional)
-        - Specifies which type of line search should be conducted in the search
-        direction. The following types are possible:
-            "bracket" - backets minimum and finds vertex of parabola formed by
-            3 minimum points
-            "quadratic" - fits a quadratic to the search points and finds vertex
-        Defaults to bracket. Not defined for SQP algorithm.
-
-        n_search(int,optional)
-        -Number of points to be considered in the search direction. Defaults to
-        8. Not defined for SQP algorithm.
-
-        max_iterations(int,optional)
-        -Maximum number of iterations for the optimization algorithm. Defaults to
-        inf.
-
-        wolfe_armijo(float,optional)
-        -Value of c1 in the Wolfe conditions. Defaults to 1e-4.
-
-        wolfe_curv(float,optional)
-        -Value of c2 in the Wolfe conditions. Defaults to 0.9 for BGFS.
-
-    Output
-    ------
-
-        Optimum(OptimizerResult)
-        - Object containing information about the result of the optimization.
-        Attributes include:
-            x(array-like,shape(n,))
-                Point in the design space where the optimization ended.
-            f(scalar)
-                Value of the objective function at optimum.
-            success(bool)
-                Indicates whether the optimizer exitted normally.
-            message(str)
-                Message about how the optimizer exitted.
-            obj_calls(int)
-                How many calls were made to the objective function during optimization.
-            cstr_calls(array-like(n_cstr),int)
-                How many calls were made to each constraint function during optimization.
-
-    """
+    """Minimize a scalar function in one or more variables"""
 
     #Initialize settings
     settings = c.Settings(**kwargs)
@@ -237,19 +93,18 @@ def minimize(fun,x0,**kwargs):
         for i in range(n_vars):
             eval_header += ', {0:>20}'.format('x'+str(i))
         eval_filename = "evaluations"+settings.file_tag+".txt"
+
+        # Kick off evaluation storage process
         writer = pool.apply_async(eval_write,(eval_filename,eval_header,queue))
 
-        #Print setup information to command line
+        # Print setup information to command line
         printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings)
         print(opt_header)
 
         # Drive to the minimum
         opt = find_minimum(f,g,x_start,settings)
-        opt.obj_calls = f.eval_calls.value
-        for i in range(n_cstr):
-            opt.cstr_calls.append(g[i].eval_calls.value)
 
-        #Finalize multiprocessing
+        # Finalize multiprocessing
         queue.put('kill')
 
     # Run the final case
@@ -258,8 +113,8 @@ def minimize(fun,x0,**kwargs):
 
 def find_minimum(f,g,x_start,settings):
     """Calls specific optimization algorithm as needed"""
-    if settings.method == "bgfs":
-        return bgfs(f,x_start,settings)
+    if settings.method == "bfgs":
+        return bfgs(f,x_start,settings)
     elif settings.method == "sqp":
         return sqp(f,g,x_start,settings)
     elif settings.method == "grg":
@@ -268,10 +123,10 @@ def find_minimum(f,g,x_start,settings):
         raise ValueError("Method improperly specified.")
 
 
-def bgfs(f,x_start,settings):
+def bfgs(f,x_start,settings):
     """Performs quasi-Newton, unconstrained optimization"""
 
-    if settings.verbose: print("Beginning simple unconstrained BGFS optimization.")
+    if settings.verbose: print("Beginning simple unconstrained BFGS optimization.")
     iter = -1
     n = len(x_start)
     o_iter = -1
@@ -283,15 +138,21 @@ def bgfs(f,x_start,settings):
         i_iter = 0
         iter += 1
 
-        f0 = f.f(x0)
+        f0_eval = f.pool.apply_async(f.f,(x0,))
         del_f0 = f.del_f(x0)
-        append_file(iter,o_iter,i_iter,f0,settings.alpha_d,mag_dx, x0, del_f0, settings)
+        f0 = f0_eval.get()
+        append_file(iter,o_iter,i_iter,f0,0.0,0.0,x0,del_f0,settings)
         N0 = np.eye(n)
+
+        # Determine search direction and perform line search
         s = -np.dot(N0,del_f0)
-        s = s/np.linalg.norm(s)
-        x1,f1,alpha = line_search(x0,f0,s,del_f0,f,settings)
+        alpha_guess = alpha_from_s(s,settings.n_search)
+        mag_s = np.linalg.norm(s)
+        s = s/mag_s
+        if settings.verbose: print("Predicted optimum alpha: {0}".format(mag_s))
+        x1,f1,alpha = line_search(x0,f0,s,del_f0,f,alpha_guess,settings)
         delta_x0 = x1-x0
-        mag_dx = np.linalg.norm(delta_x0)
+        mag_dx = alpha
 
         while iter < settings.max_iterations and mag_dx > settings.termination_tol:
             i_iter += 1
@@ -301,26 +162,27 @@ def bgfs(f,x_start,settings):
             del_f1 = f.del_f(x1)
             append_file(iter,o_iter,i_iter,f1,alpha,mag_dx,x1,del_f1,settings)
 
+            # Check for gradient termination
+            if np.linalg.norm(del_f1)<settings.grad_tol:
+                return c.OptimizerResult(f1,x1,True,"Gradient tolerance reached.",iter,f.eval_calls.value)
+
             # Check second Wolfe condition
-            if np.inner(s.T,del_f1.T) < settings.wolfe_curv*np.inner(s.T,del_f0.T):
+            if np.inner(delta_x0.T,del_f1.T) < settings.wolfe_curv*np.inner(delta_x0.T,del_f0.T):
                 print("Wolfe condition ii not satisfied.")
-                break
+            #    break
 
             # Update Hessian
-            gamma0 = del_f1-del_f0
-            denom = np.matrix(delta_x0).T*np.matrix(gamma0)
-            NG = np.matrix(N0)*np.matrix(gamma0)
-            A = np.asscalar(1+np.matrix(gamma0).T*NG/denom)
-            B = (np.matrix(delta_x0)*np.matrix(delta_x0).T/denom)
-            C = (np.matrix(delta_x0)*np.matrix(gamma0).T*np.matrix(N0)+NG*np.matrix(delta_x0).T)/denom
-            N1 = N0+A*B-C
+            N1 = get_N(N0,delta_x0,del_f0,del_f1)
 
             # Determine new search direction and perform line search
             s = -np.dot(N1,del_f1)
-            s = s/np.linalg.norm(s)
-            x2,f2,alpha = line_search(x1,f1,s,del_f1,f,settings)
+            alpha_guess = alpha_from_s(s,settings.n_search)
+            mag_s = np.linalg.norm(s)
+            s = s/mag_s
+            if settings.verbose: print("Predicted optimum alpha: {0}".format(mag_s))
+            x2,f2,alpha = line_search(x1,f1,s,del_f1,f,alpha_guess,settings)
             delta_x1 = x2-x1
-            mag_dx = np.linalg.norm(delta_x1)
+            mag_dx = alpha
 
             # Update variables for next iteration
             x0 = x1
@@ -331,57 +193,33 @@ def bgfs(f,x_start,settings):
             x1 = x2
             f1 = f2
 
-    del_f2 = f.del_f(x2)
-    append_file(iter,o_iter,i_iter,f2,alpha,mag_dx,x2,del_f2,settings)
-    return c.OptimizerResult(f2,x2,True,"Optimizer exitted normally.",iter)
+    return c.OptimizerResult(f2,x2,True,"Step tolerance reached.",iter,f.eval_calls.value)
+
+def alpha_from_s(s,n_search):
+    return np.linalg.norm(s)*2/n_search
+
+def get_N(N0,delta_x0,del_f0,del_f1):
+    gamma0 = del_f1-del_f0
+    denom = np.matrix(delta_x0).T*np.matrix(gamma0)
+    NG = np.matrix(N0)*np.matrix(gamma0)
+    A = np.asscalar(1+np.matrix(gamma0).T*NG/denom)
+    B = (np.matrix(delta_x0)*np.matrix(delta_x0).T/denom)
+    C = (np.matrix(delta_x0)*np.matrix(gamma0).T*np.matrix(N0)+NG*np.matrix(delta_x0).T)/denom
+    N1 = N0+A*B-C
+    return N1
     
     
-def line_search(x0,f0,s,del_f0,f,settings):
-    """Perform line search to find a minimum in the objective function.
+def line_search(x0,f0,s,del_f0,f,alpha,settings):
+    """Perform line search to find a minimum in the objective function."""
 
-    This subroutine evaluates the objective function multiple times in the
-    direction of s. It either selects the minimum and two bracketting points
-    or all points and fits a parabola to these to find the vertex. The step 
-    length is adjusted if no bracketted minimum can be found.
-
-    Inputs
-    ------
-
-        x0(ndarray(n,))
-        -Point at which to start the line search.
-
-        f0(float)
-        -Objective function value at initial point.
-
-        s(ndarray(n,))
-        -Search direction.
-
-        del_f0(ndarray(n,))
-        -Gradient at x0
-
-        f(Objective)
-        -Objective function object.
-
-        settigns(Settings)
-        -Settings object.
-
-    Outputs
-    -------
-
-        x1(ndarray(n,))
-        -Optimum point in the search direction.
-
-        f1(float)
-        -Value of objective function at optimum point.
-
-        alpha(float)
-        -Step size used to find optimum.
-
-    """
     if settings.verbose:
-        print('line search ----------------------------------------------------------------------------')
+        print('Line Search ----------------------------------------------------------------------------')
+        print('Search Direction: {0}'.format(s))
 
-    alpha = np.float(np.copy(settings.alpha_d))
+    if settings.alpha_d is not None:
+        alpha = settings.alpha_d
+
+    if settings.verbose: print('Initial step size: {0}'.format(alpha))
 
     while True:
         x_search = [x0+s*alpha*i for i in range(1,settings.n_search+1)]
@@ -392,35 +230,34 @@ def line_search(x0,f0,s,del_f0,f,settings):
 
         if settings.verbose:
             for i in range(settings.n_search + 1):
-                out = '{0:5d}'.format(i)
+                out = '{0:5d}, {1:15.7E}'.format(i,f_search[i])
                 for j in range(len(x0)):
                     out += ', {0:15.7E}'.format(np.asscalar(x_search[i][j]))
-                out += ', {0:15.7E}'.format(f_search[i])
                 print(out)
 
         # Check for invalid results
         if np.isnan(f_search).any():
             print('Found NaN in line search at the following design point:')
-            print(x_search[np.where(np.isnan(f_search))])
+            print(x_search[np.where(np.isnan(f_search))[0]])
             break
 
         # Check for stopping criteria
         if f_search[1] > f_search[0] and alpha < settings.termination_tol:
-            print('Alpha within stopping tolerance: alpha = {0}'.format(alpha))
+            if settings.verbose: print('Alpha within stopping tolerance: alpha = {0}'.format(alpha))
             return x0,f0,alpha
         
         # Check for plateau
         if min(f_search) == max(f_search):
-            print('Objective function has plateaued')
+            if settings.verbose: print('Objective function has plateaued')
             break
             
         # See if alpha needs to be adjusted
         min_ind = f_search.index(min(f_search))
         if min_ind == 0:
-            if settings.verbose: print('Too big of a step. Reducing alpha')
+            if settings.verbose: print('Too big of a step. Reducing alpha by {0}'.format(settings.alpha_mult))
             alpha /= settings.alpha_mult
         elif min_ind == settings.n_search:
-            if settings.verbose: print('Too small of a step. Increasing alpha')
+            if settings.verbose: print('Too small of a step. Increasing alpha by {0}'.format(settings.alpha_mult))
             alpha *= settings.alpha_mult
         else:
             break
@@ -484,10 +321,11 @@ def sqp(f,g,x_start,settings):
         iter += 1
 
         # Create quadratic approximation
-        f0 = f.f(x0)
+        f0_eval = f.pool.apply_async(f.f,(x0,))
         g0 = eval_constr(g,x0)
         del_f0,del_g0 = eval_grad(x0,f,g,n_vars,n_cstr)
         del_2_L0 = np.eye(n_vars)
+        f0 = f0_eval.get()
         append_file(iter,o_iter,i_iter,f0,mag_dx,mag_dx,x0,del_f0,settings,g=g0,del_g=del_g0)
             
         # Estimate initial penalty function
@@ -534,9 +372,9 @@ def sqp(f,g,x_start,settings):
             mag_dx = np.linalg.norm(delta_x)
 
             if mag_dx<settings.termination_tol and P2>f2: # The algorithm thinks it's found an optimum when it hasn't
-                if settings.verbose: print("Stuck at optimum outside of feasible space. Resetting BGFS update.")
+                if settings.verbose: print("Stuck at optimum outside of feasible space. Resetting BFGS update.")
                 mag_dx = 1
-                break # Reset BGFS
+                break # Reset BFGS
             
             # End of inner loop
         # End of outer loop
@@ -549,7 +387,10 @@ def sqp(f,g,x_start,settings):
     for i in range(n_cstr):
         del_g1[:,i] = g[i].del_g(x1).flatten()
     append_file(iter,o_iter,i_iter,f1,mag_dx,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
-    return c.OptimizerResult(f2,x2,True,"Optimizer exitted normally.",iter)
+    cstr_calls = []
+    for i in range(n_cstr):
+        cstr_calls.append(g[i].eval_calls.value)
+    return c.OptimizerResult(f2,x2,True,"Optimizer exitted normally.",iter,f.eval_calls.value,cstr_calls)
 
 
 def eval_grad(x0,f,g,n_vars,n_cstr):
@@ -562,7 +403,7 @@ def eval_grad(x0,f,g,n_vars,n_cstr):
 
 
 def get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x):
-    # BGFS update for Lagrangian Hessian
+    # BFGS update for Lagrangian Hessian
     del_L0 = np.copy(del_f0)
     del_L1 = np.copy(del_f1)
     for i in range(n_cstr):

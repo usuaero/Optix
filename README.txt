@@ -117,6 +117,11 @@ Inputs
     if the change in x for any step becomes less than the termination
     tolerance. Defaults to 1e-12.
 
+    grad_tol(float,optional)
+    - Point at which the optimization will quit. Execution terminates
+    if the norm of the gradient at any step becomes less than this
+    tolerance. Defaults to 1e-12.
+
     verbose(bool,optional)
     - If set to true, extra information about each step of the
     optimization will be printed to the command line.
@@ -139,9 +144,14 @@ Inputs
     dx(float,optional)
     - Step size to be used in finite difference methods. Defaults to 0.001
 
-    default_alpha(float,optional)
-    - Initial step size to be used in the line search. Defaults to 10 times dx.
-    Not defined for SQP.
+    alpha_d(float,optional)
+    - Step size to be used in line searches. If not specified, the step size
+    will be calculated from the predicted optimum of the approximation. Not
+    defined for SQP.
+
+    alpha_mult(float,optional)
+    - Factor by which alpha is adjusted during each iteration of the line
+    search. Defaults to n_search. Not defined for SQP.
 
     line_search(string,optional)
     - Specifies which type of line search should be conducted in the search
