@@ -54,6 +54,7 @@ class Settings:
         self.max_iterations = kwargs.get("max_iterations",np.inf)
         self.wolfe_armijo = kwargs.get("wolfe_armijo",1e-4)
         self.wolfe_curv = kwargs.get("wolfe_curv",0.9)
+        self.strict_penalty = kwargs.get("strict_penalty",True)
 
         self.use_finite_diff = grad == None
 
@@ -71,6 +72,7 @@ class Settings:
             raise ValueError("Bounds or constraints may not be specified for the simple BGFS algorithm.")
 
 class OptimizerResult:
+    """Return data from the 'minimize' function"""
 
     def __init__(self,f,x,success,message,iterations,obj_calls,cstr_calls=[]):
         self.f = f

@@ -311,7 +311,7 @@ def sqp(f,g,x_start,settings):
     n_ineq_cstr = settings.n_ineq_cstr
     
     x0 = np.copy(x_start)
-    mag_dx = 1
+    mag_dx = 1 # Ensures the loop executes at least once
     
     # Start outer iteration
     while iter < settings.max_iterations and mag_dx > settings.termination_tol:
@@ -326,9 +326,9 @@ def sqp(f,g,x_start,settings):
         del_f0,del_g0 = eval_grad(x0,f,g,n_vars,n_cstr)
         del_2_L0 = np.eye(n_vars)
         f0 = f0_eval.get()
-        append_file(iter,o_iter,i_iter,f0,mag_dx,mag_dx,x0,del_f0,settings,g=g0,del_g=del_g0)
+        append_file(iter,o_iter,i_iter,f0,0.0,0.0,x0,del_f0,settings,g=g0,del_g=del_g0)
             
-        # Estimate initial penalty function
+        # Estimate initial penalty function. We allow this to be artificially high.
         P0 = np.copy(f0)
         for constr in g0:
             if constr < 0:
@@ -339,10 +339,8 @@ def sqp(f,g,x_start,settings):
         
         mag_dx = np.linalg.norm(delta_x)
 
-        first = True
-        
         # Start inner iteration
-        while first or mag_dx > settings.termination_tol:
+        while mag_dx > settings.termination_tol:
             first = False
             iter += 1
             i_iter += 1
@@ -371,7 +369,8 @@ def sqp(f,g,x_start,settings):
             P1 = P2
             mag_dx = np.linalg.norm(delta_x)
 
-            if mag_dx<settings.termination_tol and P2>f2: # The algorithm thinks it's found an optimum when it hasn't
+            # The algorithm may be stuck at a level point outside of feasible space.
+            if mag_dx<settings.termination_tol and P2>f2:
                 if settings.verbose: print("Stuck at optimum outside of feasible space. Resetting BFGS update.")
                 mag_dx = 1
                 break # Reset BFGS
@@ -390,7 +389,7 @@ def sqp(f,g,x_start,settings):
     cstr_calls = []
     for i in range(n_cstr):
         cstr_calls.append(g[i].eval_calls.value)
-    return c.OptimizerResult(f2,x2,True,"Optimizer exitted normally.",iter,f.eval_calls.value,cstr_calls)
+    return c.OptimizerResult(f1,x1,True,"Optimizer exitted normally.",iter,f.eval_calls.value,cstr_calls)
 
 
 def eval_grad(x0,f,g,n_vars,n_cstr):
@@ -417,6 +416,7 @@ def get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x):
 
 def get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L0,del_f0,del_g0,g0,settings):
     # Solve for delta_x and lambda given each possible combination of binding/non-binding constraints
+    if settings.verbose: print("Penalty to beat: {0}".format(P0))
 
     # If a given combination has no negative Lagrangian multipliers corresponding to inequality constraints, the loop exits.
     # An equality constraint is always binding and its Lagrange multiplier my be any value.
@@ -473,10 +473,10 @@ def get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L0,del_f0,del_g0,g0
     P1 = np.copy(f1)
     for i in range(n_cstr):
         P1 += np.asscalar(abs(l[i])*abs(g1[i]))
-    if settings.verbose: print("Objective: {0}, Penalty: {1}".format(f1,P1))
+    if settings.verbose: print("Point: {0}, Objective: {1}, Penalty: {2}".format(x1.flatten(),f1,P1))
 
     # Cut back step if the penalty function has increased
-    while P1 > P0 and np.linalg.norm(delta_x) > settings.termination_tol:
+    while settings.strict_penalty and P1 > P0 and np.linalg.norm(delta_x) > settings.termination_tol:
         if settings.verbose: print("Stepped too far! Cutting step in half.")
         delta_x /= 2
         x1 = x0+delta_x
@@ -490,8 +490,8 @@ def get_delta_x(x0,f0,f,g,P0,n_vars,n_cstr,n_ineq_cstr,del_2_L0,del_f0,del_g0,g0
                 elif l[i]==0 and g1[i]<0: # We may have started violating a new constraint
                     P1 += abs(g1[i])
                     continue
-            P1 += np.asscalar(abs(l[i])*abs(g1[i]))
-        if settings.verbose: print("Objective: {0}, Penalty: {1}".format(f1,P1))
+            P1 += np.asscalar(abs(g1[i]))
+        if settings.verbose: print("Point: {0}, Objective: {1}, Penalty: {2}".format(x1.flatten(),f1,P1))
 
     return delta_x,l,x1,f1,g1,P1
 

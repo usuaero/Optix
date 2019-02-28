@@ -144,36 +144,9 @@ Inputs
     dx(float,optional)
     - Step size to be used in finite difference methods. Defaults to 0.001
 
-    alpha_d(float,optional)
-    - Step size to be used in line searches. If not specified, the step size
-    will be calculated from the predicted optimum of the approximation. Not
-    defined for SQP.
-
-    alpha_mult(float,optional)
-    - Factor by which alpha is adjusted during each iteration of the line
-    search. Defaults to n_search. Not defined for SQP.
-
-    line_search(string,optional)
-    - Specifies which type of line search should be conducted in the search
-    direction. The following types are possible:
-        "bracket" - backets minimum and finds vertex of parabola formed by
-        3 minimum points
-        "quadratic" - fits a quadratic to the search points and finds vertex
-    Defaults to bracket. Not defined for SQP algorithm.
-
-    n_search(int,optional)
-    -Number of points to be considered in the search direction. Defaults to
-    8. Not defined for SQP algorithm.
-
     max_iterations(int,optional)
     -Maximum number of iterations for the optimization algorithm. Defaults to
     inf.
-
-    wolfe_armijo(float,optional)
-    -Value of c1 in the Wolfe conditions. Defaults to 1e-4.
-
-    wolfe_curv(float,optional)
-    -Value of c2 in the Wolfe conditions. Defaults to 0.9 for BGFS.
 
 Output
 ------
@@ -193,6 +166,44 @@ Output
             How many calls were made to the objective function during optimization.
         cstr_calls(array-like(n_cstr),int)
             How many calls were made to each constraint function during optimization.
+
+Method Specific Arguments
+-------------------------
+
+BFGS
+
+    n_search(int,optional)
+    -Number of points to be considered in the search direction. Defaults to
+    8.
+
+    alpha_d(float,optional)
+    - Step size to be used in line searches. If not specified, the step size
+    will be calculated from the predicted optimum of the approximation.
+
+    alpha_mult(float,optional)
+    - Factor by which alpha is adjusted during each iteration of the line
+    search. Defaults to n_search.
+
+    line_search(string,optional)
+    - Specifies which type of line search should be conducted in the search
+    direction. The following types are possible:
+        "bracket" - backets minimum and finds vertex of parabola formed by
+        3 minimum points
+        "quadratic" - fits a quadratic to the search points and finds vertex
+    Defaults to bracket.
+
+    wolfe_armijo(float,optional)
+    -Value of c1 in the Wolfe conditions. Defaults to 1e-4.
+
+    wolfe_curv(float,optional)
+    -Value of c2 in the Wolfe conditions. Defaults to 0.9.
+
+SQP
+
+    strict_penalty(bool,optional)
+    - Specifies whether a given step in the optimization must result in a decrease in
+    the penatly function. Setting this to false may help convergence of some problems
+    and speed computation. Defaults to true.
 
 --------------------------------------------------------------------
 FILE OUTPUTS
