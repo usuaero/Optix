@@ -1,11 +1,11 @@
 --------------------------------------------------------------------
 \                  #######                       
- \         X       #     # #####  ##### # #    # 
-  \       / \      #     # #    #   #   #  #  #  
-   \     /   X     #     # #    #   #   #   ##   
-    X---X    | X-X #     # #####    #   #   ##   
-             |/    #     # #        #   #  #  #  
-             X     ####### #        #   # #    # 
+ \         X       #     # #####  ##### # #    #
+  \       / \      #     # #    #   #   #  #  # 
+   \     /   X     #     # #    #   #   #   ##  
+    X---X    | X-X #     # #####    #   #   ##  
+             |/    #     # #        #   #  #  # 
+             X     ####### #        #   # #    #
 --------------------------------------------------------------------
 AeroLab Optimization Software
 
@@ -14,7 +14,7 @@ Dr Doug Hunsaker (professor, Utah State University; director, USU AeroLab)
 Josh Hodson (graduate student, Utah State University)
 Cory Goates (undergraduate student, Utah State University)
 
-README (last revision: 2/9/2019)
+README (last revision: 3/4/2019)
 
 NOTE FOR LEGACY OPTIX USERS:
 Since January of 2019, API of Optix has changed significantly to somewhat
@@ -22,7 +22,7 @@ mirror that of scipy.optimize. We continue working to improve the API and
 functionality of Optix. This README will always contain update information
 for using Optix.
 
-AS OF 2/22/2019 GRG FUNCTIONALITY IN OPTIX ARE NOT AVAILABLE.
+AS OF 2/22/2019, GRG FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
 
 AS OF 2/22/2019, BOUNDS FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
 
@@ -192,11 +192,21 @@ BFGS
         "quadratic" - fits a quadratic to the search points and finds vertex
     Defaults to bracket.
 
+    rsq_tol(float,optional):
+    - Specifies the necessary quality of the quadratic fit to the line search
+    (only used if line_search is "quadratic"). The quadratic fit will only be
+    accepted if the R^2 value of the fit is above rsq_tol. Defaults to 0.8.
+
     wolfe_armijo(float,optional)
-    -Value of c1 in the Wolfe conditions. Defaults to 1e-4.
+    - Value of c1 in the Wolfe conditions. Defaults to 1e-4.
 
     wolfe_curv(float,optional)
-    -Value of c2 in the Wolfe conditions. Defaults to 0.9.
+    - Value of c2 in the Wolfe conditions. Defaults to 0.9.
+
+    hess_init(float,optional)
+    - Sets the value of the Hessian to hess_init*[I] for the first iteration of
+    the BFGS update. Increasing this value may help speed convergence of some
+    problems. Defaults to 1.
 
 SQP
 
@@ -204,6 +214,12 @@ SQP
     - Specifies whether a given step in the optimization must result in a decrease in
     the penatly function. Setting this to false may help convergence of some problems
     and speed computation. Defaults to true.
+
+    hess_init(float,optional)
+    - Sets the value of the Hessian to hess_init*[I] for the first iteration of
+    the BFGS update. Increasing this value may help speed convergence of some
+    problems, but this is not recommended in most cases. Behavior is not stable if
+    this value is less than 1. Defaults to 1.
 
 --------------------------------------------------------------------
 FILE OUTPUTS

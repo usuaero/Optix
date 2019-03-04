@@ -38,7 +38,11 @@ class Settings:
     """Contains settings used by optimizer"""
 
     def __init__(self,**kwargs):
+
+        # Objective function args
         self.args = kwargs.get("args",())
+
+        # General args
         self.method = kwargs.get("method")
         self.termination_tol = kwargs.get("termination_tol",1e-12)
         self.grad_tol = kwargs.get("grad_tol",1e-12)
@@ -47,20 +51,31 @@ class Settings:
         self.file_tag = kwargs.get("file_tag","")
         self.max_processes = kwargs.get("max_processes",1)
         self.dx = kwargs.get("dx",0.01)
+        self.max_iterations = kwargs.get("max_iterations",np.inf)
+
+        self.use_finite_diff = kwargs.get("jac") == None
+
+        # BFGS args
         self.n_search = kwargs.get("n_search",8)
         self.alpha_d = kwargs.get("default_alpha",None)
         self.alpha_mult = kwargs.get("alpha_mult",self.n_search)
         self.search_type = kwargs.get("line_search","bracket")
-        self.max_iterations = kwargs.get("max_iterations",np.inf)
+        self.rsq_tol = kwargs.get("rsq_tol",0.8)
         self.wolfe_armijo = kwargs.get("wolfe_armijo",1e-4)
         self.wolfe_curv = kwargs.get("wolfe_curv",0.9)
+        self.hess_init = kwargs.get("hess_init",1.0)
+
+        if self.wolfe_curv < self.wolfe_armijo:
+            raise ValueError("Wolfe conditions improperly specified.")
+
+        # SQP args
         self.strict_penalty = kwargs.get("strict_penalty",True)
 
-        self.use_finite_diff = grad == None
-
+        # Bounds and constraints
         bounds = kwargs.get("bounds")
         constraints = kwargs.get("constraints")
 
+        # Assign method if not specified
         if self.method == None:
             if (bounds != None or constraints != None):
                 self.method = "sqp"

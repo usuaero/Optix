@@ -1,4 +1,3 @@
-from collections import OrderedDict
 import numpy as np
 import os
 import shutil
@@ -8,6 +7,7 @@ import classes as c
 import csv
 import matplotlib.pyplot as plt
 import itertools
+from time import time
 
 np.set_printoptions(precision = 14)
 
@@ -34,80 +34,32 @@ def minimize(fun,x0,**kwargs):
         f = c.Objective(fun,pool,queue,settings,grad=grad,hess=hess)
 
         #Initialize constraints
-        constraints = kwargs.get("constraints")
-        if constraints != None:
-            n_cstr = len(constraints)
-            n_ineq_cstr = 0
-            g = []
-            # Inequality constraints are stored first
-            for constraint in constraints:
-                if constraint["type"] == "ineq":
-                    n_ineq_cstr += 1
-                    grad = constraint.get("grad")
-                    constr = c.Constraint(constraint["type"],constraint["fun"],pool,queue,settings,grad=grad)
-                    g.append(constr)
-            for constraint in constraints:
-                if constraint["type"] == "eq":
-                    grad = constraint.get("grad")
-                    constr = c.Constraint(constraint["type"],constraint["fun"],pool,queue,settings,grad=grad)
-                    g.append(constr)
-            g = np.array(g)
-        else:
-            g = None
-            n_cstr = 0
-            n_ineq_cstr = 0
-
-        if n_cstr-n_ineq_cstr > n_vars:
-            raise ValueError("The problem is overconstrained")
-
+        g,n_cstr,n_ineq_cstr = get_constraints(kwargs.get("constraints"),pool,queue,settings)
         settings.n_cstr = n_cstr
         settings.n_ineq_cstr = n_ineq_cstr
         bounds = kwargs.get("bounds")
 
-        #Begin formatting of output files
-        opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
-        for i in range(n_vars):
-            opt_header += ', {0:>20}'.format('x'+str(i))
-        for i in range(n_cstr):
-            opt_header += ', {0:>20}'.format('g'+str(i))
-
-        opt_filename = "optimize"+settings.file_tag+".txt"
-        settings.opt_file = opt_filename
-        with open(opt_filename, 'w') as opt_file:
-            opt_file.write(opt_header + '\n')
-
-        grad_header = '{0:>84}  {1:>20}'.format(' ','df')
-        for i in range(n_cstr):
-            grad_header += (', {0:>'+str(21*n_vars)+'}').format('dg'+str(i))
-        grad_header += '\n{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
-        for j in range(n_cstr+1):
-            for i in range(n_vars):
-                grad_header += ', {0:>20}'.format('dx'+str(i))
-        
-        grad_filename = "gradient"+settings.file_tag+".txt"
-        settings.grad_file = grad_filename
-        with open(grad_filename, 'w') as grad_file:
-            grad_file.write(grad_header + '\n')
-
-        eval_header = '{0:>20}'.format('f')
-        for i in range(n_vars):
-            eval_header += ', {0:>20}'.format('x'+str(i))
-        eval_filename = "evaluations"+settings.file_tag+".txt"
-
-        # Kick off evaluation storage process
-        writer = pool.apply_async(eval_write,(eval_filename,eval_header,queue))
+        # Check constraints
+        if n_cstr-n_ineq_cstr > n_vars:
+            raise ValueError("The problem is overconstrained")
 
         # Print setup information to command line
         printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings)
-        print(opt_header)
+
+        # Initialize formatting of output files
+        writer = format_output_files(n_vars,n_cstr,settings,pool,queue)
 
         # Drive to the minimum
         opt = find_minimum(f,g,x_start,settings)
 
-        # Finalize multiprocessing
+        # Kill evaluation printer process
         queue.put('kill')
+        writer_success = writer.get()
+        if not writer_success:
+            print("Evaluation writer did not terminate successfully.")
+        pool.close()
+        pool.join()
 
-    # Run the final case
     return opt
 
 
@@ -126,12 +78,15 @@ def find_minimum(f,g,x_start,settings):
 def bfgs(f,x_start,settings):
     """Performs quasi-Newton, unconstrained optimization"""
 
+    # Initialize
     if settings.verbose: print("Beginning simple unconstrained BFGS optimization.")
     iter = -1
     n = len(x_start)
     o_iter = -1
     mag_dx = 1
     x0 = np.copy(x_start)
+
+    # Outer loop. Sets the N matrix to [I].
     while iter < settings.max_iterations and mag_dx > settings.termination_tol:
         if settings.verbose: print("Setting Hessian to the identity matrix.")
         o_iter += 1
@@ -142,7 +97,7 @@ def bfgs(f,x_start,settings):
         del_f0 = f.del_f(x0)
         f0 = f0_eval.get()
         append_file(iter,o_iter,i_iter,f0,0.0,0.0,x0,del_f0,settings)
-        N0 = np.eye(n)
+        N0 = np.eye(n)*settings.hess_init
 
         # Determine search direction and perform line search
         s = -np.dot(N0,del_f0)
@@ -154,6 +109,7 @@ def bfgs(f,x_start,settings):
         delta_x0 = x1-x0
         mag_dx = alpha
 
+        # Inner loop. Uses BFGS update for N.
         while iter < settings.max_iterations and mag_dx > settings.termination_tol:
             i_iter += 1
             iter += 1
@@ -166,10 +122,10 @@ def bfgs(f,x_start,settings):
             if np.linalg.norm(del_f1)<settings.grad_tol:
                 return c.OptimizerResult(f1,x1,True,"Gradient tolerance reached.",iter,f.eval_calls.value)
 
-            # Check second Wolfe condition
+            # Check second Wolfe condition. If not satisfied, reset BFGS update.
             if np.inner(delta_x0.T,del_f1.T) < settings.wolfe_curv*np.inner(delta_x0.T,del_f0.T):
-                print("Wolfe condition ii not satisfied.")
-            #    break
+                print("Wolfe condition ii not satisfied (step did not result in a sufficient decrease in objective function gradient).")
+                break
 
             # Update Hessian
             N1 = get_N(N0,delta_x0,del_f0,del_f1)
@@ -180,7 +136,14 @@ def bfgs(f,x_start,settings):
             mag_s = np.linalg.norm(s)
             s = s/mag_s
             if settings.verbose: print("Predicted optimum alpha: {0}".format(mag_s))
-            x2,f2,alpha = line_search(x1,f1,s,del_f1,f,alpha_guess,settings)
+            try:
+                x2,f2,alpha = line_search(x1,f1,s,del_f1,f,alpha_guess,settings)
+            except Exception as e:
+                if e == "wolfe": # Check first Wolfe condition. If not satisfied, reset BFGS update.
+                    print("Wolfe condition i not satisfied (step did not result in a sufficient decrease in the objective function).")
+                    break
+                else:
+                    print(e)
             delta_x1 = x2-x1
             mag_dx = alpha
 
@@ -189,16 +152,17 @@ def bfgs(f,x_start,settings):
             f0 = f1
             del_f0 = del_f1
             delta_x0 = delta_x1
-            
             x1 = x2
             f1 = f2
 
     return c.OptimizerResult(f2,x2,True,"Step tolerance reached.",iter,f.eval_calls.value)
 
 def alpha_from_s(s,n_search):
+    """Sets predicted optimum in the middle of the line search."""
     return np.linalg.norm(s)*2/n_search
 
 def get_N(N0,delta_x0,del_f0,del_f1):
+    """Perform BFGS update on N matrix"""
     gamma0 = del_f1-del_f0
     denom = np.matrix(delta_x0).T*np.matrix(gamma0)
     NG = np.matrix(N0)*np.matrix(gamma0)
@@ -222,6 +186,8 @@ def line_search(x0,f0,s,del_f0,f,alpha,settings):
     if settings.verbose: print('Initial step size: {0}'.format(alpha))
 
     while True:
+
+        # Get objective function values in the line search
         x_search = [x0+s*alpha*i for i in range(1,settings.n_search+1)]
         with mp.Pool(processes=settings.max_processes) as pool:
             f_search = pool.map(f.f,x_search)
@@ -239,17 +205,17 @@ def line_search(x0,f0,s,del_f0,f,alpha,settings):
         if np.isnan(f_search).any():
             print('Found NaN in line search at the following design point:')
             print(x_search[np.where(np.isnan(f_search))[0]])
-            break
-
-        # Check for stopping criteria
-        if f_search[1] > f_search[0] and alpha < settings.termination_tol:
-            if settings.verbose: print('Alpha within stopping tolerance: alpha = {0}'.format(alpha))
-            return x0,f0,alpha
+            raise ValueError("Objective function returned a NaN")
         
         # Check for plateau
         if min(f_search) == max(f_search):
             if settings.verbose: print('Objective function has plateaued')
-            break
+            return x0,f0,alpha # A plateaued objective will break find_opt_alpha()
+
+        # Check for alpha getting too small
+        if f_search[1] > f_search[0] and alpha < settings.termination_tol:
+            if settings.verbose: print('Alpha within stopping tolerance: alpha = {0}'.format(alpha))
+            return x0,f0,alpha
             
         # See if alpha needs to be adjusted
         min_ind = f_search.index(min(f_search))
@@ -262,23 +228,25 @@ def line_search(x0,f0,s,del_f0,f,alpha,settings):
         else:
             break
     
-    # Find optimum value of alpha
+    # Find value of alpha at the optimum point in the search direction
     a = [alpha*i for i in range(settings.n_search+1)]
     alpha_opt = find_opt_alpha(a,f_search,min_ind,settings)
     if settings.verbose: print('Final alpha = {0}'.format(alpha_opt))
     x1 = x0+s*alpha_opt
     f1 = f.f(x1)
 
-    # Check first Wolfe condition (NOTE: does not affect execution)
+    # Check first Wolfe condition. Will break out of inner BFGS loop if not satisfied.
     armijo = f0+settings.wolfe_armijo*alpha_opt*np.inner(s.T,del_f0.T)
     if f1 > armijo:
-        print("Wolve condition i not satisfied.")
+        raise ValueError("wolfe")
     return x1,f1,alpha_opt
 
 
 def find_opt_alpha(a,f_search,min_ind,settings):
     # Quadratic method
-    if settings.method == 'quadratic':
+    if settings.search_type == 'quadratic':
+
+        # Fit quadratic
         q = quadratic(np.asarray(a),np.asarray(f_search))
         (alpha_opt,f_opt) = q.vertex()
         
@@ -286,7 +254,7 @@ def find_opt_alpha(a,f_search,min_ind,settings):
         if not (alpha_opt is None or alpha_opt < 0 or not q.convex() or q.rsq < settings.rsq_tol):
             return alpha_opt
     
-    # If bracketting method is selected, or is quadratic method fails, find the vertex defined by 3 minimum points
+    # If bracketting method is selected, or if quadratic method fails, find the vertex defined by 3 minimum points
     a1 = a[min_ind - 1]
     a2 = a[min_ind]
     a3 = a[min_ind + 1]
@@ -324,7 +292,7 @@ def sqp(f,g,x_start,settings):
         f0_eval = f.pool.apply_async(f.f,(x0,))
         g0 = eval_constr(g,x0)
         del_f0,del_g0 = eval_grad(x0,f,g,n_vars,n_cstr)
-        del_2_L0 = np.eye(n_vars)
+        del_2_L0 = np.eye(n_vars)*settings.hess_init
         f0 = f0_eval.get()
         append_file(iter,o_iter,i_iter,f0,0.0,0.0,x0,del_f0,settings,g=g0,del_g=del_g0)
             
@@ -347,6 +315,13 @@ def sqp(f,g,x_start,settings):
         
             # Create quadratic approximation
             del_f1,del_g1 = eval_grad(x1,f,g,n_vars,n_cstr)
+
+            # Check gradient termination
+            if np.linalg.norm(del_f1)<settings.grad_tol:
+                cstr_calls = []
+                for i in range(n_cstr):
+                    cstr_calls.append(g[i].eval_calls.value)
+                return OptimizerResult(f1,x1,True,"Gradient termination tolerance reached.",iter,f.eval_calls.value,cstr_calls)
         
             # Update the Lagrangian Hessain
             del_2_L1 = get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x)
@@ -389,7 +364,7 @@ def sqp(f,g,x_start,settings):
     cstr_calls = []
     for i in range(n_cstr):
         cstr_calls.append(g[i].eval_calls.value)
-    return c.OptimizerResult(f1,x1,True,"Optimizer exitted normally.",iter,f.eval_calls.value,cstr_calls)
+    return c.OptimizerResult(f1,x1,True,"Step termination tolerance reached.",iter,f.eval_calls.value,cstr_calls)
 
 
 def eval_grad(x0,f,g,n_vars,n_cstr):
@@ -525,6 +500,31 @@ def eval_constr(g,x1):
     return g1
 
 
+def get_constraints(constraints,pool,queue,settings):
+    if constraints != None:
+        n_cstr = len(constraints)
+        n_ineq_cstr = 0
+        g = []
+        # Inequality constraints are stored first
+        for constraint in constraints:
+            if constraint["type"] == "ineq":
+                n_ineq_cstr += 1
+                grad = constraint.get("grad")
+                constr = c.Constraint(constraint["type"],constraint["fun"],pool,queue,settings,grad=grad)
+                g.append(constr)
+        for constraint in constraints:
+            if constraint["type"] == "eq":
+                grad = constraint.get("grad")
+                constr = c.Constraint(constraint["type"],constraint["fun"],pool,queue,settings,grad=grad)
+                g.append(constr)
+        g = np.array(g)
+    else:
+        g = None
+        n_cstr = 0
+        n_ineq_cstr = 0
+    return g,n_cstr,n_ineq_cstr
+
+
 def append_file(iter,o_iter,i_iter,obj_fcn_value,alpha,mag_dx,design_point,gradient,settings,**kwargs):
     g = kwargs.get("g")
     del_g = kwargs.get("del_g")
@@ -582,12 +582,55 @@ def printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings):
             print('using forward difference approximation')
     print('')
 
-def eval_write(args):
-    filename,header,q = args
+def eval_write(filename,header,q):
     with open(filename,'w') as f:
         f.write(header+"\n")
+        f.flush()
         while True:
-            msg = q.get()
+            try:
+                msg = q.get()
+            except:
+                continue
             if msg=='kill':
                 break
             f.write(msg+"\n")
+            f.flush()
+    return True
+
+def format_output_files(n_vars,n_cstr,settings,pool,queue):
+    opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
+    for i in range(n_vars):
+        opt_header += ', {0:>20}'.format('x'+str(i))
+    for i in range(n_cstr):
+        opt_header += ', {0:>20}'.format('g'+str(i))
+
+    opt_filename = "optimize"+settings.file_tag+".txt"
+    settings.opt_file = opt_filename
+    with open(opt_filename, 'w') as opt_file:
+        opt_file.write(opt_header + '\n')
+
+    grad_header = '{0:>84}  {1:>20}'.format(' ','df')
+    for i in range(n_cstr):
+        grad_header += (', {0:>'+str(21*n_vars)+'}').format('dg'+str(i))
+    grad_header += '\n{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
+    for j in range(n_cstr+1):
+        for i in range(n_vars):
+            grad_header += ', {0:>20}'.format('dx'+str(i))
+    
+    grad_filename = "gradient"+settings.file_tag+".txt"
+    settings.grad_file = grad_filename
+    with open(grad_filename, 'w') as grad_file:
+        grad_file.write(grad_header + '\n')
+
+    eval_header = '{0:>20}'.format('f')
+    for i in range(n_vars):
+        eval_header += ', {0:>20}'.format('x'+str(i))
+    eval_filename = "evaluations"+settings.file_tag+".txt"
+
+    # Kick off evaluation storage process
+    writer = pool.apply_async(eval_write,(eval_filename,eval_header,queue))
+
+    # Print header to command line
+    print(opt_header)
+
+    return writer
