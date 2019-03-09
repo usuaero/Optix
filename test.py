@@ -2,7 +2,7 @@ import optix as opt
 from random import random
 import sys
 
-message = ""
+message = []
 
 try:
     def f(x):
@@ -14,10 +14,10 @@ try:
     print("Optimum value: {0}".format(optimum.f))
     print("Optimum point: {0}".format(optimum.x))
     print("Function calls: {0}".format(optimum.obj_calls))
-    message += "Passed bracketting, 8 search point, 8 process BGFS test.\n"
+    message.append( "Passed bracketting, 8 search point, 8 process BGFS test.\n")
 except Exception:
-    message += "Failed bracketting, 8 search point, 8 process BGFS test.\n"
-    message += "Unexpected error: {0}\n".format(sys.exc_info()[0])
+    message.append( "Failed bracketting, 8 search point, 8 process BGFS test.\n")
+    message.append( "Unexpected error: {0}\n".format(sys.exc_info()[0]))
     
 
 try:
@@ -30,10 +30,10 @@ try:
     print("Optimum value: {0}".format(optimum.f))
     print("Optimum point: {0}".format(optimum.x))
     print("Function calls: {0}".format(optimum.obj_calls))
-    message += "Passed bracketting, 4 search point, single process BGFS test.\n"
+    message.append( "Passed bracketting, 4 search point, single process BGFS test.\n")
 except:
-    message += "Failed bracketting, 4 search point, single process BGFS test.\n"
-    message += "Unexpected error: {0}\n".format(sys.exc_info()[0])
+    message.append( "Failed bracketting, 4 search point, single process BGFS test.\n")
+    message.append( "Unexpected error: {0}\n".format(sys.exc_info()[0]))
 
 try:
     def f(x):
@@ -45,10 +45,10 @@ try:
     print("Optimum value: {0}".format(optimum.f))
     print("Optimum point: {0}".format(optimum.x))
     print("Function calls: {0}".format(optimum.obj_calls))
-    message += "Passed quadratic, 8 search point, single process BGFS test.\n"
+    message.append( "Passed quadratic, 8 search point, single process BGFS test.\n")
 except:
-    message += "Failed quadratic, 8 search point, single process BGFS test.\n"
-    message += "Unexpected error: {0}\n".format(sys.exc_info()[0])
+    message.append( "Failed quadratic, 8 search point, single process BGFS test.\n")
+    message.append( "Unexpected error: {0}\n".format(sys.exc_info()[0]))
 
 try:
     def f(x):
@@ -60,10 +60,10 @@ try:
     print("Optimum value: {0}".format(optimum.f))
     print("Optimum point: {0}".format(optimum.x))
     print("Function calls: {0}".format(optimum.obj_calls))
-    message += "Passed bracketting, 8 search point, 8 process alpha multiplier BGFS test.\n"
+    message.append( "Passed bracketting, 8 search point, 8 process alpha multiplier BGFS test.\n")
 except:
-    message += "Failed bracketting, 8 search point, 8 process alpha multiplier BGFS test.\n"
-    message += "Unexpected error: {0}\n".format(sys.exc_info()[0])
+    message.append( "Failed bracketting, 8 search point, 8 process alpha multiplier BGFS test.\n")
+    message.append( "Unexpected error: {0}\n".format(sys.exc_info()[0]))
 
 try:
     def f(x):
@@ -75,10 +75,10 @@ try:
     print("Optimum value: {0}".format(optimum.f))
     print("Optimum point: {0}".format(optimum.x))
     print("Function calls: {0}".format(optimum.obj_calls))
-    message += "Passed three vaiable, bracketting, 8 search point, 8 process BGFS test.\n"
+    message.append( "Passed three vaiable, bracketting, 8 search point, 8 process BGFS test.\n")
 except:
-    message += "Failed three vaiable, bracketting, 8 search point, 8 process BGFS test.\n"
-    message += "Unexpected error: {0}\n".format(sys.exc_info()[0])
+    message.append( "Failed three vaiable, bracketting, 8 search point, 8 process BGFS test.\n")
+    message.append( "Unexpected error: {0}\n".format(sys.exc_info()[0]))
 
 try:
     def f(x):
@@ -107,10 +107,10 @@ try:
     for calls in optimum.cstr_calls:
         cstr_calls += calls
     print("Constraint calls: {0}".format(cstr_calls))
-    message += "Passed 4 inequality constraint, 8 process SQP test.\n"
+    message.append( "Passed 4 inequality constraint, 8 process SQP test.\n")
 except:
-    message += "Failed 4 inequality constraint, 8 process SQP test.\n"
-    message += "Unexpected error: {0}\n".format(sys.exc_info()[0])
+    message.append( "Failed 4 inequality constraint, 8 process SQP test.\n")
+    message.append( "Unexpected error: {0}\n".format(sys.exc_info()[0]))
 
 try:
     def f(x):
@@ -142,10 +142,10 @@ try:
     for calls in optimum.cstr_calls:
         cstr_calls += calls
     print("Constraint calls: {0}".format(cstr_calls))
-    message += "Passed 3 variable, 5 inequality constraint, 8 process SQP test.\n"
+    message.append( "Passed 3 variable, 5 inequality constraint, 8 process SQP test.\n")
 except:
-    message += "Failed 3 variable, 5 inequality constraint, 8 process SQP test.\n"
-    message += "Unexpected error: {0}\n".format(sys.exc_info()[0])
+    message.append( "Failed 3 variable, 5 inequality constraint, 8 process SQP test.\n")
+    message.append( "Unexpected error: {0}\n".format(sys.exc_info()[0]))
 
 optimum.obj_calls = -1000000
 
@@ -179,9 +179,9 @@ try:
     for calls in optimum.cstr_calls:
         cstr_calls += calls
     print("Constraint calls: {0}".format(cstr_calls))
-    message += "Passed 3 variable, 2 inequality constraint, 3 equality constraint, forward differencing 8 process SQP test.\n"
+    message.append( "Passed 3 variable, 2 inequality constraint, 3 equality constraint, forward differencing 8 process SQP test.\n")
 except:
-    message += "Failed 3 variable, 2 inequality constraint, 3 equality constraint, forward differencing 8 process SQP test.\n"
-    message += "Unexpected error: {0}\n".format(sys.exc_info()[0])
+    message.append( "Failed 3 variable, 2 inequality constraint, 3 equality constraint, forward differencing 8 process SQP test.\n")
+    message.append( "Unexpected error: {0}\n".format(sys.exc_info()[0]))
 
-print(message)
+print(" ".join(message))

@@ -1,20 +1,10 @@
---------------------------------------------------------------------
-\                  #######                       
- \         X       #     # #####  ##### # #    #
-  \       / \      #     # #    #   #   #  #  # 
-   \     /   X     #     # #    #   #   #   ##  
-    X---X    | X-X #     # #####    #   #   ##  
-             |/    #     # #        #   #  #  # 
-             X     ####### #        #   # #    #
---------------------------------------------------------------------
+# Optix
 AeroLab Optimization Software
 
 Created by:
 Dr Doug Hunsaker (professor, Utah State University; director, USU AeroLab)
 Josh Hodson (graduate student, Utah State University)
 Cory Goates (undergraduate student, Utah State University)
-
-README (last revision: 3/4/2019)
 
 NOTE FOR LEGACY OPTIX USERS:
 Since January of 2019, API of Optix has changed significantly to somewhat
@@ -26,218 +16,40 @@ AS OF 2/22/2019, GRG FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
 
 AS OF 2/22/2019, BOUNDS FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
 
---------------------------------------------------------------------
-INTRODUCTION
---------------------------------------------------------------------
-
 Optix is a gradient-based optimization tool designed with aerodynamics
 in mind. Recognizing that aerodynamic functions are often computationally
 intensive, Optix has been designed to be as light-weight and parallel
 as possible, while offering an intuitive API.
 
---------------------------------------------------------------------
-API
---------------------------------------------------------------------
+The algorithms have been developed, for the most part, using the following
+references:
+
+Parkinson, Balling, Hedengren, "Optimization Methods for Engineering Design",
+Brigham Young University, 2013.
+
+## API
 
 All functionality of Optix is wrapped within the minimize() function in
 optix.py.
 
-OpimizerResult object = minimize(fun,x0,**kwargs)
+### Example
 
-Inputs
-------
+    ```python
+    import optix as opt
+    from random import random
+    
+    def f(x):
+        return x[0]**4-2*x[1]*x[0]**2+x[1]**2+x[0]**2-2*x[0]+5
+    
+    x0 = [-10+20*random(),-10+20*random()]
+    
+    optimum = opt.minimize(f,x0,file_tag="_test",n_search=8,max_processes=8,line_search="quadratic",termination_tol=1e-6,verbose=False,hess_init=1)
+    print("Optimum value: {0}".format(optimum.f))
+    print("Optimum point: {0}".format(optimum.x))
+    print("Function calls: {0}".format(optimum.obj_calls))
+    ```
 
-    fun(callable)
-    - Objective to be minimized. Must be a scalar function:
-    def fun(x,*args):
-        return float
-    where x is a vector of the design variables and *args is all
-    other parameters necessary for calling the function. Note that
-    Optix will handle x as a column vector (i.e. shape(n_vars,1)).
-    This should be taken into consideration when writing fun().
-
-    x0(array-like,shape(n,))
-    - A starting guess for the independent variables. May be
-    a list or numpy array. All variables must be represented as
-    minimize determines the number of variables from the length
-    of this vector.
-
-    args(tuple,optional)
-    - Arguments to be passed to the objective function.
-
-    method(str,optional)
-    - Method to be used by minimize to find the minimum of the
-    objective function. May be one of the following:
-        Unconstrained problem:
-            "bgfs" - quasi-Nexton with BGFS Hessian update
-        Constrained problem:
-            "sqp" - sequential quadratic programming
-            "grg" - generalized reduced gradient
-    If no method is specified, minimize will choose either "bgfs"
-    or "sqp", based on whether constraints were given.
-
-    grad(callable,optional)
-    - Returns the gradient of the objective function at a specified
-    point. Definition is the same as fun() but must return array-like,
-    shape(n,). If not specified, will be estimated using a finite-
-    difference approximation.
-
-    hess(callable,optional)
-    - Returns the Hessian of of the objective function at a specified
-    point. Definition is the same as fun() but must return array-like,
-    shape(n,n). If not specified, will be estimated using a finite-
-    difference approximation.
-    NOTE: bgfs, sqp, and grg do not require direct Hessian evaluations,
-    so this functionality is not defined at this time.
-
-    bounds(sequence of tuple,optional)
-    - Bounds on independent variables. Can only be used with constrained
-    methods. Should be a sequence of (min,max) pairs for each element in
-    x. Use -numpy.inf or numpy.inf to specify mo bound.
-
-    constraints(list of {Constraint,dict}, optional)
-    - Constraints on the design space. Can only be used with constrained
-    methods. Given as a list of dictionaries, each having the following
-    keys:
-        type (str)
-            Constraint type; either 'eq' for equality or 'ineq' for
-            inequality; equality means the constraint function must
-            equate to 0 and inequality means the constraint function
-            must be positive.
-        fun (callable)
-            Value of the constraint function. Must return a scalar. May 
-            only have one argument, being an array of the design variables.
-        grad (callable,optional)
-            Returns the gradient of the constraint function at a
-            specified point. Must return array-like, shape(n,). May
-            only have one argument, being an array of the design variables.
-
-    termination_tol(float,optional)
-    - Point at which the optimization will quit. Execution terminates
-    if the change in x for any step becomes less than the termination
-    tolerance. Defaults to 1e-12.
-
-    grad_tol(float,optional)
-    - Point at which the optimization will quit. Execution terminates
-    if the norm of the gradient at any step becomes less than this
-    tolerance. Defaults to 1e-12.
-
-    verbose(bool,optional)
-    - If set to true, extra information about each step of the
-    optimization will be printed to the command line.
-
-    cent_diff(bool,optional)
-    - Flag for setting finite-difference approximation method. If set
-    to false, a forward-difference approximation will be used. Otherwise,
-    defaults to a central-difference.
-
-    file_tag(str,optional)
-    - Tag to be appended to the output filenames. If not specified,
-    output files will be overwritten each time minimize() is called.
-    Output files may still be overwritten if file_tag does not change
-    with each call.
-
-    max_processes(int,optional)
-    - Maximum number of processes to be used in multiprocessing. Defaults
-    fo 1.
-
-    dx(float,optional)
-    - Step size to be used in finite difference methods. Defaults to 0.001
-
-    max_iterations(int,optional)
-    -Maximum number of iterations for the optimization algorithm. Defaults to
-    inf.
-
-Output
-------
-
-    Optimum(OptimizerResult)
-    - Object containing information about the result of the optimization.
-    Attributes include:
-        x(array-like,shape(n,))
-            Point in the design space where the optimization ended.
-        f(scalar)
-            Value of the objective function at optimum.
-        success(bool)
-            Indicates whether the optimizer exitted normally.
-        message(str)
-            Message about how the optimizer exitted.
-        obj_calls(int)
-            How many calls were made to the objective function during optimization.
-        cstr_calls(array-like(n_cstr),int)
-            How many calls were made to each constraint function during optimization.
-
-Method Specific Arguments
--------------------------
-
-BFGS
-
-    n_search(int,optional)
-    -Number of points to be considered in the search direction. Defaults to
-    8.
-
-    alpha_d(float,optional)
-    - Step size to be used in line searches. If not specified, the step size
-    will be calculated from the predicted optimum of the approximation.
-
-    alpha_mult(float,optional)
-    - Factor by which alpha is adjusted during each iteration of the line
-    search. Defaults to n_search.
-
-    line_search(string,optional)
-    - Specifies which type of line search should be conducted in the search
-    direction. The following types are possible:
-        "bracket" - backets minimum and finds vertex of parabola formed by
-        3 minimum points
-        "quadratic" - fits a quadratic to the search points and finds vertex
-    Defaults to bracket.
-
-    rsq_tol(float,optional):
-    - Specifies the necessary quality of the quadratic fit to the line search
-    (only used if line_search is "quadratic"). The quadratic fit will only be
-    accepted if the R^2 value of the fit is above rsq_tol. Defaults to 0.8.
-
-    wolfe_armijo(float,optional)
-    - Value of c1 in the Wolfe conditions. Defaults to 1e-4.
-
-    wolfe_curv(float,optional)
-    - Value of c2 in the Wolfe conditions. Defaults to 0.9.
-
-    hess_init(float,optional)
-    - Sets the value of the Hessian to hess_init*[I] for the first iteration of
-    the BFGS update. Increasing this value may help speed convergence of some
-    problems. Defaults to 1.
-
-SQP
-
-    strict_penalty(bool,optional)
-    - Specifies whether a given step in the optimization must result in a decrease in
-    the penatly function. Setting this to false may help convergence of some problems
-    and speed computation. Defaults to true.
-
-    hess_init(float,optional)
-    - Sets the value of the Hessian to hess_init*[I] for the first iteration of
-    the BFGS update. Increasing this value may help speed convergence of some
-    problems, but this is not recommended in most cases. Behavior is not stable if
-    this value is less than 1. Defaults to 1.
-
-GRG
-
-    n_search(int,optional)
-    -Number of points to be considered in the search direction. Defaults to
-    8.
-
-    alpha_d(float,optional)
-    - Step size to be used in line searches. If not specified, the step size
-    is the optimum step size from the previous iteration.
-
-    alpha_mult(float,optional)
-    - Factor by which alpha is adjusted during each iteration of the line
-    search. Defaults to n_search.
-
---------------------------------------------------------------------
-FILE OUTPUTS
---------------------------------------------------------------------
+## FILE OUTPUTS
 
 optix.py will also output results to 3 .txt files. These 3 files are named optimize, gradient,
 and evaluations, each appended with the user-specified file tag. The first two are written
@@ -248,8 +60,51 @@ objective and constraint gradients at each point in the optimization. Evaluation
 outputs the value of the objective function at each point considered during optimization,
 including points used to calculate finite differences.
 
---------------------------------------------------------------------
-CONTACT
---------------------------------------------------------------------
+## Documentation
 
-For bugs, please create an issue on the github repository.
+For documentation, please refer to the docstrings. This can be done either by using the
+built in python help() command in the interpreter or by refering to the source. For
+example, to view the minimize() parameters and return values, type:
+
+    help(optix.minimize)
+
+Please note that optix should be imported first.
+
+## Installation
+
+The Optix package can be installed by navigating to the root directory of the project
+and using the following command
+
+   pip install
+
+### Getting the Source Code
+
+The source code can be found at [https://github.com/usuaero/Optix](https://github.com/usuaero/Optix)
+
+You can either download the source as a ZIP file and extract the contents, or 
+clone the MachUp repository using Git. If your system does not already have a 
+version of Git installed, you will not be able to use this second option unless 
+you first download and install Git. If you are unsure, you can check by typing 
+`git --version` into a command prompt.
+
+#### Downloading source as a ZIP file
+
+1. Open a web browser and navigate to [https://github.com/usuaero/Optix](https://github.com/usuaero/Optix)
+2. Make sure the Branch is set to `Master`
+3. Click the `Clone or download` button
+4. Select `Download ZIP`
+5. Extract the downloaded ZIP file to a local directory on your machine
+
+#### Cloning the Github repository
+
+1. From the command prompt navigate to the directory where MachUp will be installed
+2. `git clone https://github.com/usuaero/Optix`
+
+## Testing
+Unit tests are are run using the following command.
+
+'python3 test.py'
+
+##Support For bugs, please create an issue on the github repository.
+
+##License This project is licensed under the MIT license. See LICENSE file for more information.
