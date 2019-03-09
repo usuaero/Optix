@@ -199,14 +199,14 @@ class quadratic(object):
         # Calculate the quadratic coefficients
         x_sq = [xx**2 for xx in x]
         A = np.vstack([x_sq, x, np.ones(len(x))]).T
-        self.a, self.b, self.c = np.linalg.lstsq(A, y)[0]
+        self.a, self.b, self.c = np.linalg.lstsq(A,y,rcond=None)[0]
         
         # Calculate the coefficient of determination
         f = [self.f(xx) for xx in x]
         ssres = ((f - y)**2).sum()
         sstot = ((y - y.mean())**2).sum()
 
-        if abs(sstot) < zero:
+        if abs(sstot) < 1e-14:
             # Data points actually formed a horizontal line
             self.rsq = 0.0
         else:

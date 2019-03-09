@@ -139,7 +139,7 @@ Inputs
 
     max_processes(int,optional)
     - Maximum number of processes to be used in multiprocessing. Defaults
-    to 1.
+    fo 1.
 
     dx(float,optional)
     - Step size to be used in finite difference methods. Defaults to 0.001
@@ -220,6 +220,20 @@ SQP
     the BFGS update. Increasing this value may help speed convergence of some
     problems, but this is not recommended in most cases. Behavior is not stable if
     this value is less than 1. Defaults to 1.
+
+GRG
+
+    n_search(int,optional)
+    -Number of points to be considered in the search direction. Defaults to
+    8.
+
+    alpha_d(float,optional)
+    - Step size to be used in line searches. If not specified, the step size
+    is the optimum step size from the previous iteration.
+
+    alpha_mult(float,optional)
+    - Factor by which alpha is adjusted during each iteration of the line
+    search. Defaults to n_search.
 
 --------------------------------------------------------------------
 FILE OUTPUTS
