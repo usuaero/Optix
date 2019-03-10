@@ -8,8 +8,10 @@ import csv
 import matplotlib.pyplot as plt
 import itertools
 from time import time
+import warnings
 
 np.set_printoptions(precision = 14)
+np.seterr(all='warn')
 
 zero = 1.0e-20
 
@@ -236,7 +238,7 @@ def minimize(fun,x0,**kwargs):
             raise ValueError("The problem is overconstrained")
 
         # Print setup information to command line
-        printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings)
+        print_setup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings)
 
         # Initialize formatting of output files
         format_output_files(n_vars,n_cstr,settings,pool,queue)
@@ -306,7 +308,7 @@ def bfgs(f,x_start,settings):
         f0_eval = f.pool.apply_async(f.f,(x0,))
         del_f0 = f.del_f(x0)
         f0 = f0_eval.get()
-        append_file(iter,o_iter,i_iter,f0,0.0,0.0,x0,del_f0,settings)
+        append_file(iter,o_iter,i_iter,f0,0.0,x0,del_f0,settings)
         N0 = np.eye(n)*settings.hess_init
 
         # Determine search direction and perform line search
@@ -326,7 +328,7 @@ def bfgs(f,x_start,settings):
 
             # Update gradient and output file
             del_f1 = f.del_f(x1)
-            append_file(iter,o_iter,i_iter,f1,alpha,mag_dx,x1,del_f1,settings)
+            append_file(iter,o_iter,i_iter,f1,mag_dx,x1,del_f1,settings)
 
             # Check for gradient termination
             if np.linalg.norm(del_f1)<settings.grad_tol:
@@ -503,7 +505,7 @@ def sqp(f,g,x_start,settings):
         del_f0,del_g0 = eval_grad(x0,f,g,n_vars,n_cstr)
         del_2_L0 = np.eye(n_vars)*settings.hess_init
         f0 = f0_eval.get()
-        append_file(iter,o_iter,i_iter,f0,0.0,0.0,x0,del_f0,settings,g=g0,del_g=del_g0)
+        append_file(iter,o_iter,i_iter,f0,0.0,x0,del_f0,settings,g=g0,del_g=del_g0)
             
         # Estimate initial penalty function. We allow this to be artificially high.
         P0 = np.copy(f0)
@@ -535,7 +537,7 @@ def sqp(f,g,x_start,settings):
             # Update the Lagrangian Hessain
             del_2_L1 = get_del_2_L(del_2_L0,del_f0,del_f1,l,del_g0,del_g1,n_vars,n_cstr,delta_x)
 
-            append_file(iter,o_iter,i_iter,f1,mag_dx,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
+            append_file(iter,o_iter,i_iter,f1,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
         
             # Get step
             delta_x,l,x2,f2,g2,P2 = get_delta_x(x1,f1,f,g,P1,n_vars,n_cstr,n_ineq_cstr,del_2_L1,del_f1,del_g1,g1,settings)
@@ -569,7 +571,7 @@ def sqp(f,g,x_start,settings):
     del_g1 = np.zeros((n_vars,n_cstr))
     for i in range(n_cstr):
         del_g1[:,i] = g[i].del_g(x1).flatten()
-    append_file(iter,o_iter,i_iter,f1,mag_dx,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
+    append_file(iter,o_iter,i_iter,f1,mag_dx,x1,del_f1,settings,g=g1,del_g=del_g1)
     cstr_calls = []
     for i in range(n_cstr):
         cstr_calls.append(g[i].eval_calls.value)
@@ -712,16 +714,17 @@ def grg(f,g,x_start,settings):
     
     x0 = np.copy(x_start)
     mag_dx = 1 # Ensures the loop executes at least once
+    f0 = f.f(x0)
+    g0 = eval_constr(g,x0)
 
     while mag_dx > settings.termination_tol and iter < settings.max_iterations:
         iter += 1
         
         # Evaluate current point
-        f0 = f.f(x0)
-        g0 = eval_constr(g,x0)
         del_f0,del_g0 = eval_grad(x0,f,g,n_vars,n_cstr)
 
-        append_file(iter,iter,iter,f0,0,0,x0,del_f0,settings,g=g0,del_g=del_g0)
+        mag_dx = 0
+        append_file(iter,iter,iter,f0,mag_dx,x0,del_f0,settings,g=g0,del_g=del_g0)
         
         # Determine binding constraints
         cstr_b = np.reshape((g0<=0),(n_cstr,1)) # All constraints are greater-than
@@ -755,12 +758,16 @@ def grg(f,g,x_start,settings):
         if settings.verbose: print("Search Direction: {0}".format(s.T))
         
         # Conduct line search
-        x1,f1,g1 = grg_line_search(s,z0,z_ind0,y0,y_ind0,f,g,cstr_b,mag_dx,d_psi_d_z0,d_psi_d_y0,n_vars,n_binding,settings)
+        x1,f1,g1 = grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,mag_dx,d_psi_d_z0,d_psi_d_y0,n_vars,n_cstr,n_binding,settings)
         
         delta_x = x1-x0
         mag_dx = np.linalg.norm(delta_x)
         x0 = x1
+        f0 = f1
+        g0 = g1
     
+    del_f0,del_g0 = eval_grad(x0,f,g,n_vars,n_cstr)
+    append_file(iter+1,iter+1,iter+1,f0,mag_dx,x0,del_f0,settings,g=g0,del_g=del_g0)
     cstr_calls = []
     for i in range(n_cstr):
         cstr_calls.append(g[i].eval_calls.value)
@@ -819,32 +826,70 @@ def partition_vars(n_vars,n_binding,variables0,del_f0,d_psi_d_x0):
     return z0,del_f_z0,d_psi_d_z0,z_ind0,y0,del_f_y0,d_psi_d_y0,y_ind0
 
 
-def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,g,cstr_b,alpha,d_psi_d_z0,d_psi_d_y0,n_vars,n_binding,settings):
+def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_psi_d_y0,n_vars,n_cstr,n_binding,settings):
     """Performs line search in independent variables to find a minimum."""
-    if settings.verbose: print("Line Search------------------------------")
+    if settings.verbose:
+        print("Line Search------------------------------")
+        msg = ["{0:>20}".format("f")]
+        for i in range(n_vars):
+            msg.append(", {0:>20}".format("x"+str(i)))
+        print("".join(msg))
 
     if settings.alpha_d is not None:
         alpha = settings.alpha_d
 
     while alpha>settings.termination_tol:
         if settings.verbose: print("Step size: {0}".format(alpha))
-        x_search = np.zeros((n_vars,settings.n_search))
-        f_search = np.zeros(settings.n_search)
-        g_search = np.zeros((settings.n_cstr,settings.n_search))
 
-        for i in range(settings.n_search):
-            x_search[:,i],f_search[i],g_search[:,i] = eval_search_point(f,g,z0,y0,alpha*(i+1),s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_binding,cstr_b)
-            if settings.verbose:
-                msg = "{0:>20E}".format(f_search[i])
+        # Initialize search arrays
+        x_search = []
+        f_search = []
+        g_search = []
+
+        # Add initial point
+        if n_binding != 0:
+            y_search = y0-np.linalg.inv(d_psi_d_y0)*np.matrix(d_psi_d_z0)*np.matrix(alpha*s)
+            var_i = np.concatenate((z0,y0))
+        else:
+            var_i = z0
+        x_search.append(var_i[np.where(np.concatenate((z_ind0,y_ind0))>=n_binding)].flatten())
+        f_search.append(f0)
+        g_search.append(g0.flatten())
+        count = 1
+
+        point_evals = []
+        for i in range(1,settings.n_search+1):
+            point_evals.append(f.pool.apply_async(eval_search_point,(f,g,z0,y0,alpha*i,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_binding,cstr_b)))
+        for i in range(1,settings.n_search+1):
+            point_vals = point_evals[i-1].get()
+            if point_vals == None:
+                continue
+            x_search.append(point_vals[0])
+            f_search.append(point_vals[1])
+            g_search.append(point_vals[2])
+            count += 1
+
+        if count == 1: # Line search returned no valid results
+            alpha /= settings.alpha_mult
+            if settings.verbose: print("Minimum not found. Decreasing step size.")
+            continue
+
+        x_search = np.asarray(x_search).T
+        f_search = np.asarray(f_search)
+        g_search = np.asarray(g_search).T
+
+        if settings.verbose:
+            for i in range(count):
+                msg = ["{0:>20E}".format(f_search[i])]
                 for x in x_search[:,i]:
-                    msg += ", {0:>20E}".format(x)
-                print(msg)
+                    msg.append(", {0:>20E}".format(x))
+                print("".join(msg))
 
         min_ind = np.argmin(f_search)
         while (g_search[:,min_ind]<0).any():
             min_ind -= 1 # Step back to feasible space
     
-        if min_ind == settings.n_search-1: # Minimum at end of line search, step size must be increased
+        if min_ind == settings.n_search: # Minimum at end of line search, step size must be increased
             alpha *= settings.alpha_mult
             if settings.verbose: print("Minimum not found. Increasing step size.")
             continue
@@ -865,32 +910,38 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,g,cstr_b,alpha,d_psi_d_z0,d_psi_d_y0
 
 def eval_search_point(f,g,z0,y0,alpha,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_binding,cstr_b):
 
-    # Determine new point
-    z_search = (z0+alpha*s)
-    if n_binding != 0:
-        y_search = y0-np.linalg.inv(d_psi_d_y0)*np.matrix(d_psi_d_z0)*np.matrix(alpha*s)
-    var_i = np.concatenate((z_search,y_search))
-    x_search = var_i[np.where(np.concatenate((z_ind0,y_ind0))>=n_binding)]
+    with warnings.catch_warnings():
+        warnings.filterwarnings('error',category=RuntimeWarning)
+        try:
+            # Determine new point
+            z_search = (z0+alpha*s)
+            if n_binding != 0:
+                y_search = np.asarray(y0-np.linalg.inv(d_psi_d_y0)*np.matrix(d_psi_d_z0)*np.matrix(alpha*s))
+                var_i = np.concatenate((z_search,y_search))
+            else:
+                var_i = z_search
+            x_search = var_i[np.where(np.concatenate((z_ind0,y_ind0))>=n_binding)]
 
-    # Evaluate constraints
-    g_search = eval_constr(g,x_search)
+            # Evaluate constraints
+            g_search = eval_constr(g,x_search)
 
-    # Drive dependent variables back to where violated constraints are satisfied
-    iterations = 0
-    while n_binding != 0 and (g_search[cstr_b]<0).any() and iterations<100:
-        if (g_search[np.logical_not(cstr_b)]<0).any(): # We've started violating a new constraint
-            return None,None,None
-        iterations += 1 # To avoid divergence of the N-R method
+            # Drive dependent variables back to the boundary of binding constraints which were violated
+            cstr_v = g_search[cstr_b]<0
+            iterations = 0
+            while n_binding != 0 and (g_search[cstr_b][cstr_v]!=0).any() and iterations<100:
+                iterations += 1 # To avoid divergence of the N-R method
 
-        g_search[np.where(g_search[cstr_b]>0)] = 0 # The constraints that are still satisfied should just be left alone
-        y_search = y_search+(np.linalg.inv(d_psi_d_y0)*np.matrix(g_search[cstr_b]).T)
-        var_i = np.concatenate((z_search,y_search))
-        x_search = var_i[np.where(np.concatenate((z_ind0,y_ind0))>=n_binding)]
+                g_search[cstr_b][np.where(cstr_v!=True)] = 0 # Binding, non-violated constraints should just be left alone
+                y_search = np.asarray(y_search+np.linalg.inv(d_psi_d_y0)*np.matrix(g_search[cstr_b]).T)
+                var_i = np.concatenate((z_search,y_search))
+                x_search = np.asarray(var_i[np.where(np.concatenate((z_ind0,y_ind0))>=n_binding)])
 
-        g_search = eval_constr(g,x_search)
+                g_search = eval_constr(g,x_search)
 
-    f_search = f.f(x_search)
-    return x_search.flatten(),f_search,g_search.flatten()
+            f_search = f.f(x_search)
+            return np.asarray(x_search).flatten(),f_search,np.asarray(g_search).flatten()
+        except Warning:
+            return None
 
 
 def get_constraints(constraints,pool,queue,settings):
@@ -918,11 +969,11 @@ def get_constraints(constraints,pool,queue,settings):
     return g,n_cstr,n_ineq_cstr
 
 
-def append_file(iter,o_iter,i_iter,obj_fcn_value,alpha,mag_dx,design_point,gradient,settings,**kwargs):
+def append_file(iter,o_iter,i_iter,obj_fcn_value,mag_dx,design_point,gradient,settings,**kwargs):
     g = kwargs.get("g")
     del_g = kwargs.get("del_g")
 
-    msg = '{0:4d}, {1:5d}, {2:5d}, {3: 20.13E}, {4: 20.13E}, {5: 20.13E}'.format(iter, o_iter, i_iter, obj_fcn_value, alpha, mag_dx)
+    msg = '{0:4d}, {1:5d}, {2:5d}, {3: 20.13E}, {4: 20.13E}'.format(iter, o_iter, i_iter, obj_fcn_value, mag_dx)
     values_msg = msg
     for value in design_point:
         values_msg = ('{0}, {1: 20.13E}'.format(values_msg, np.asscalar(value)))
@@ -943,7 +994,8 @@ def append_file(iter,o_iter,i_iter,obj_fcn_value,alpha,mag_dx,design_point,gradi
     with open(settings.grad_file, 'a') as grad_file:
         print(grad_msg, file = grad_file)
 
-def printSetup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings):
+
+def print_setup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings):
     print("\nOptix.py from USU AeroLab\n")
     
     print('---------- Variables ----------')
@@ -991,7 +1043,7 @@ def eval_write(filename,header,q):
     return True
 
 def format_output_files(n_vars,n_cstr,settings,pool,queue):
-    opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
+    opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}'.format('iter', 'outer', 'inner', 'fitness', 'mag(dx)')
     for i in range(n_vars):
         opt_header += ', {0:>20}'.format('x'+str(i))
     for i in range(n_cstr):
@@ -1005,7 +1057,7 @@ def format_output_files(n_vars,n_cstr,settings,pool,queue):
     grad_header = '{0:>84}  {1:>20}'.format(' ','df')
     for i in range(n_cstr):
         grad_header += (', {0:>'+str(21*n_vars)+'}').format('dg'+str(i))
-    grad_header += '\n{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}, {5:>20}'.format('iter', 'outer', 'inner', 'fitness', 'alpha', 'mag(dx)')
+    grad_header += '\n{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}'.format('iter', 'outer', 'inner', 'fitness', 'mag(dx)')
     for j in range(n_cstr+1):
         for i in range(n_vars):
             grad_header += ', {0:>20}'.format('dx'+str(i))
