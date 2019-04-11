@@ -208,6 +208,10 @@ def minimize(fun,x0,**kwargs):
             alpha_mult(float,optional)
             - Factor by which alpha is adjusted during each iteration of the line
             search. Defaults to n_search.
+
+            cstr_tol(float,optional)
+            - A constraint is considered to be binding if it evaluates to less than this
+            number. Defaults to 1e-6.
     """
 
     #Initialize settings
@@ -235,7 +239,7 @@ def minimize(fun,x0,**kwargs):
 
         # Check constraints
         if n_cstr-n_ineq_cstr > n_vars:
-            raise ValueError("The problem is overconstrained")
+            raise ValueError("The problem is overconstrained.")
 
         # Print setup information to command line
         print_setup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings)
@@ -717,17 +721,19 @@ def grg(f,g,x_start,settings):
     f0 = f.f(x0)
     g0 = eval_constr(g,x0)
 
+    if (g0[:n_ineq_cstr]<-settings.cstr_tol).any() or (abs(g0[n_ineq_cstr:])>settings.cstr_tol).any():
+        raise ValueError("The initial point lies outside of feasible space!")
+
     while mag_dx > settings.termination_tol and iter < settings.max_iterations:
         iter += 1
         
         # Evaluate current point
         del_f0,del_g0 = eval_grad(x0,f,g,n_vars,n_cstr)
 
-        mag_dx = 0
         append_file(iter,iter,iter,f0,mag_dx,x0,del_f0,settings,g=g0,del_g=del_g0)
         
         # Determine binding constraints
-        cstr_b = np.reshape((g0<=0),(n_cstr,1)) # All constraints are greater-than
+        cstr_b = np.reshape([list(g0[:n_ineq_cstr].flatten()<=settings.cstr_tol)+[True for i in range(n_cstr-n_ineq_cstr)]],(n_cstr,1)) # Equality constraints are always binding.
         n_binding = np.asscalar(sum(cstr_b))
         if settings.verbose: print("{0} binding constraints".format(n_binding))
         d_psi_d_x0 = -del_g0.T[np.repeat(cstr_b,2,axis=1)].reshape((n_binding,n_vars))
@@ -751,7 +757,8 @@ def grg(f,g,x_start,settings):
             cstr_calls = []
             for i in range(n_cstr):
                 cstr_calls.append(g[i].eval_calls.value)
-            return c.OptimizerResult(f0,x0,True,"Gradient termination tolerance reached.",iter,f.eval_calls.value,cstr_calls)
+            return_message = "Gradient termination tolerance reached (magnitude = {0}).".format(np.linalg.norm(del_f_r0))
+            return c.OptimizerResult(f0,x0,True,return_message,iter,f.eval_calls.value,cstr_calls)
         
         # The search direction is opposite the direction of the reduced gradient
         s = -del_f_r0/np.linalg.norm(del_f_r0)
@@ -793,7 +800,7 @@ def partition_vars(n_vars,n_binding,variables0,del_f0,d_psi_d_x0):
     for i in range(n_vars):
         while True:
             var_ind += 1
-            if var_ind < n_binding and abs(variables0[var_ind])<1e-4: # Slack variable at limit
+            if var_ind < n_binding and (abs(variables0[var_ind])<1e-4 or variables0[var_ind]<0): # Slack variable at limit
                     z0[i] = variables0[var_ind]
                     del_f_z0[i] = 0 # df/ds is always 0
                     d_psi_d_z0[i,i] = 1 # dg/ds is always 1
@@ -833,6 +840,8 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
         msg = ["{0:>20}".format("f")]
         for i in range(n_vars):
             msg.append(", {0:>20}".format("x"+str(i)))
+        for i in range(n_cstr):
+            msg.append(", {0:>20}".format("g"+str(i)))
         print("".join(msg))
 
     if settings.alpha_d is not None:
@@ -859,7 +868,7 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
 
         point_evals = []
         for i in range(1,settings.n_search+1):
-            point_evals.append(f.pool.apply_async(eval_search_point,(f,g,z0,y0,alpha*i,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_binding,cstr_b)))
+            point_evals.append(f.pool.apply_async(eval_search_point,(f,g,z0,y0,alpha*i,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_binding,cstr_b,settings)))
         for i in range(1,settings.n_search+1):
             point_vals = point_evals[i-1].get()
             if point_vals == None:
@@ -883,10 +892,12 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
                 msg = ["{0:>20E}".format(f_search[i])]
                 for x in x_search[:,i]:
                     msg.append(", {0:>20E}".format(x))
+                for gi in g_search[:,i]:
+                    msg.append(", {0:>20E}".format(gi))
                 print("".join(msg))
 
         min_ind = np.argmin(f_search)
-        while (g_search[:,min_ind]<0).any():
+        while (g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol):
             min_ind -= 1 # Step back to feasible space
     
         if min_ind == settings.n_search: # Minimum at end of line search, step size must be increased
@@ -894,7 +905,7 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
             if settings.verbose: print("Minimum not found. Increasing step size.")
             continue
         if min_ind == 0: # Minimum at beginning of line search, step size must be reduced
-            alpha /= settings.alpha_mult
+            alpha /= settings.alpha_mult/2
             if settings.verbose: print("Minimum not found. Decreasing step size.")
             continue
         else: # Minimum is found in the middle of the line search
@@ -908,7 +919,7 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
     return x1,f1,g1
 
 
-def eval_search_point(f,g,z0,y0,alpha,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_binding,cstr_b):
+def eval_search_point(f,g,z0,y0,alpha,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_binding,cstr_b,settings):
 
     with warnings.catch_warnings():
         warnings.filterwarnings('error',category=RuntimeWarning)
@@ -925,13 +936,13 @@ def eval_search_point(f,g,z0,y0,alpha,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_bi
             # Evaluate constraints
             g_search = eval_constr(g,x_search)
 
-            # Drive dependent variables back to the boundary of binding constraints which were violated
-            cstr_v = g_search[cstr_b]<0
+            # Drive dependent variables back to the boundary of binding constraints which were violated (equality constraints are always binding).
+            cstr_v = (cstr_b & ((g_search<settings.cstr_tol)|(np.array([i>=settings.n_ineq_cstr-1 for i in range(settings.n_cstr)]))))
             iterations = 0
-            while n_binding != 0 and (g_search[cstr_b][cstr_v]!=0).any() and iterations<100:
+            while n_binding != 0 and (abs(g_search[cstr_v])>settings.cstr_tol/1000).any() and iterations<1000:
                 iterations += 1 # To avoid divergence of the N-R method
 
-                g_search[cstr_b][np.where(cstr_v!=True)] = 0 # Binding, non-violated constraints should just be left alone
+                g_search[np.where(cstr_v!=True)] = 0 # Binding, non-violated constraints should just be left alone
                 y_search = np.asarray(y_search+np.linalg.inv(d_psi_d_y0)*np.matrix(g_search[cstr_b]).T)
                 var_i = np.concatenate((z_search,y_search))
                 x_search = np.asarray(var_i[np.where(np.concatenate((z_ind0,y_ind0))>=n_binding)])
@@ -996,22 +1007,22 @@ def append_file(iter,o_iter,i_iter,obj_fcn_value,mag_dx,design_point,gradient,se
 
 
 def print_setup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings):
-    print("\nOptix.py from USU AeroLab\n")
+    print("\nOptix.py from USU AeroLab")
     
-    print('---------- Variables ----------')
+    print('\n---------- Variables ----------')
     print("Optimizing in {0} variables.".format(n_vars))
     print("Initial guess:\n{0}".format(x_start))
     if bounds != None:
         print("Variable bounds:\n{0}".format(bounds))
-    print("")
     
-    print('---------- Constraints ----------')
+    print('\n---------- Constraints ----------')
     print('{0} total constraints'.format(n_cstr))
     print('{0} inequality constraints'.format(n_ineq_cstr))
     print('{0} equality constraints'.format(n_cstr-n_ineq_cstr))
-    print("")
+    print('***Please note, your constraints will be rearranged so the inequality constraints are listed first.')
+    print('***Otherwise, the order is maintained')
 
-    print('---------- Settings ----------')
+    print('\n---------- Settings ----------')
     print('            method: {0}'.format(settings.method))
     print('     obj func args: {0}'.format(settings.args))
     print('     default alpha: {0}'.format(settings.alpha_d))

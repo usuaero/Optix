@@ -44,8 +44,8 @@ class Settings:
 
         # General args
         self.method = kwargs.get("method")
-        self.termination_tol = kwargs.get("termination_tol",1e-12)
-        self.grad_tol = kwargs.get("grad_tol",1e-12)
+        self.termination_tol = kwargs.get("termination_tol",1e-9)
+        self.grad_tol = kwargs.get("grad_tol",1e-9)
         self.verbose = kwargs.get("verbose",False)
         self.central_diff = kwargs.get("central_diff",True)
         self.file_tag = kwargs.get("file_tag","")
@@ -70,6 +70,9 @@ class Settings:
 
         # SQP args
         self.strict_penalty = kwargs.get("strict_penalty",True)
+
+        # GRG args
+        self.cstr_tol = kwargs.get("cstr_tol",1e-4)
 
         # Bounds and constraints
         bounds = kwargs.get("bounds")
