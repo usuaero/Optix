@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import itertools
 from time import time
 import warnings
+import copy
 
 np.set_printoptions(precision = 14)
 np.seterr(all='warn')
@@ -778,7 +779,7 @@ def grg(f,g,x_start,settings):
     cstr_calls = []
     for i in range(n_cstr):
         cstr_calls.append(g[i].eval_calls.value)
-    return c.OptimizerResult(f1,x1,True,"Step termination tolerance reached.",iter,f.eval_calls.value,cstr_calls)
+    return c.OptimizerResult(f1,x1,True,"Step termination tolerance reached (magnitude = {0}).".format(mag_dx),iter,f.eval_calls.value,cstr_calls)
 
 
 def eval_constr(g,x1):
@@ -830,6 +831,29 @@ def partition_vars(n_vars,n_binding,variables0,del_f0,d_psi_d_x0):
                 y_ind0.append(var_ind)
                 break
 
+    _,s,_ = np.linalg.svd(d_psi_d_y0) # Check that this matrix is not singular
+    swap_var = 0
+    while (abs(s)<1e-14).any():
+        tempind = copy.copy(z_ind0[n_binding+swap_var])
+        z_ind0[n_binding+swap_var] = y_ind0[swap_var]
+        y_ind0[swap_var] = tempind
+        
+        tempz = np.copy(z0[n_binding+swap_var])
+        z0[n_binding+swap_var] = y0[swap_var]
+        y0[swap_var] = tempz
+
+        tempgrad = np.copy(del_f_z0[n_binding+swap_var])
+        del_f_z0[n_binding+swap_var] = del_f_y0[swap_var]
+        del_f_y0[swap_var] = tempgrad
+
+        temppsi = np.copy(d_psi_d_z0[:,n_binding+swap_var])
+        d_psi_d_z0[:,n_binding+swap_var] = d_psi_d_y0[:,swap_var]
+        d_psi_d_y0[:,swap_var] = temppsi
+
+        _,s,_ = np.linalg.svd(d_psi_d_y0) # Check that this matrix is not singular
+        swap_var += 1
+        
+
     return z0,del_f_z0,d_psi_d_z0,z_ind0,y0,del_f_y0,d_psi_d_y0,y_ind0
 
 
@@ -857,18 +881,19 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
 
         # Add initial point
         if n_binding != 0:
-            y_search = y0-np.linalg.inv(d_psi_d_y0)*np.matrix(d_psi_d_z0)*np.matrix(alpha*s)
-            var_i = np.concatenate((z0,y0))
+            var_i = np.zeros(n_vars+n_binding)
+            var_i[z_ind0] = z0.flatten()
+            var_i[y_ind0] = y0.flatten()
         else:
             var_i = z0
-        x_search.append(var_i[np.where(np.concatenate((z_ind0,y_ind0))>=n_binding)].flatten())
+        x_search.append(var_i[n_binding:].flatten())
         f_search.append(f0)
         g_search.append(g0.flatten())
         count = 1
 
         point_evals = []
         for i in range(1,settings.n_search+1):
-            point_evals.append(f.pool.apply_async(eval_search_point,(f,g,z0,y0,alpha*i,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_binding,cstr_b,settings)))
+            point_evals.append(f.pool.apply_async(eval_search_point,(f,g,z0,y0,alpha*i,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_vars,n_binding,cstr_b,settings)))
         for i in range(1,settings.n_search+1):
             point_vals = point_evals[i-1].get()
             if point_vals == None:
@@ -898,6 +923,7 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
 
         min_ind = np.argmin(f_search)
         while (g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol):
+            print('stepping back')
             min_ind -= 1 # Step back to feasible space
     
         if min_ind == settings.n_search: # Minimum at end of line search, step size must be increased
@@ -919,7 +945,7 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
     return x1,f1,g1
 
 
-def eval_search_point(f,g,z0,y0,alpha,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_binding,cstr_b,settings):
+def eval_search_point(f,g,z0,y0,alpha,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_vars,n_binding,cstr_b,settings):
 
     with warnings.catch_warnings():
         warnings.filterwarnings('error',category=RuntimeWarning)
@@ -928,10 +954,12 @@ def eval_search_point(f,g,z0,y0,alpha,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_bi
             z_search = (z0+alpha*s)
             if n_binding != 0:
                 y_search = np.asarray(y0-np.linalg.inv(d_psi_d_y0)*np.matrix(d_psi_d_z0)*np.matrix(alpha*s))
-                var_i = np.concatenate((z_search,y_search))
+                var_i = np.zeros(n_vars+n_binding)
+                var_i[z_ind0] = z_search.flatten()
+                var_i[y_ind0] = y_search.flatten()
             else:
                 var_i = z_search
-            x_search = var_i[np.where(np.concatenate((z_ind0,y_ind0))>=n_binding)]
+            x_search = var_i[n_binding:]
 
             # Evaluate constraints
             g_search = eval_constr(g,x_search)
@@ -939,13 +967,19 @@ def eval_search_point(f,g,z0,y0,alpha,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_bi
             # Drive dependent variables back to the boundary of binding constraints which were violated (equality constraints are always binding).
             cstr_v = (cstr_b & ((g_search<settings.cstr_tol)|(np.array([i>=settings.n_ineq_cstr-1 for i in range(settings.n_cstr)]))))
             iterations = 0
-            while n_binding != 0 and (abs(g_search[cstr_v])>settings.cstr_tol/1000).any() and iterations<1000:
+            while n_binding != 0 and (abs(g_search[cstr_v])>settings.cstr_tol/1000).any() and iterations<10000:
                 iterations += 1 # To avoid divergence of the N-R method
 
-                g_search[np.where(cstr_v!=True)] = 0 # Binding, non-violated constraints should just be left alone
+                g_search[~cstr_v] = 0 # Binding, non-violated constraints should just be left alone
                 y_search = np.asarray(y_search+np.linalg.inv(d_psi_d_y0)*np.matrix(g_search[cstr_b]).T)
-                var_i = np.concatenate((z_search,y_search))
-                x_search = np.asarray(var_i[np.where(np.concatenate((z_ind0,y_ind0))>=n_binding)])
+                if n_binding != 0:
+                    y_search = y0-np.linalg.inv(d_psi_d_y0)*np.matrix(d_psi_d_z0)*np.matrix(alpha*s)
+                    var_i = np.zeros(n_vars+n_binding)
+                    var_i[z_ind0] = z_search.flatten()
+                    var_i[y_ind0] = y_search.flatten()
+                else:
+                    var_i = z0
+                x_search = np.asarray(var_i[n_binding:]).flatten()
 
                 g_search = eval_constr(g,x_search)
 
