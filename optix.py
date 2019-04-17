@@ -722,8 +722,8 @@ def grg(f,g,x_start,settings):
     f0 = f.f(x0)
     g0 = eval_constr(g,x0)
 
-    if (g0[:n_ineq_cstr]<-settings.cstr_tol).any() or (abs(g0[n_ineq_cstr:])>settings.cstr_tol).any():
-        raise ValueError("The initial point lies outside of feasible space!")
+    #if (g0[:n_ineq_cstr]<-settings.cstr_tol).any() or (abs(g0[n_ineq_cstr:])>settings.cstr_tol).any():
+    #    raise ValueError("The initial point lies outside of feasible space!")
 
     while mag_dx > settings.termination_tol and iter < settings.max_iterations:
         iter += 1
@@ -745,7 +745,7 @@ def grg(f,g,x_start,settings):
         variables0 = np.concatenate((s0,x0),axis=0) # We place the slack variables first since we would prefer those be the independent variables
         
         # Partition variables
-        z0,del_f_z0,d_psi_d_z0,z_ind0,y0,del_f_y0,d_psi_d_y0,y_ind0 = partition_vars(n_vars,n_binding,variables0,del_f0,d_psi_d_x0)
+        z0,del_f_z0,d_psi_d_z0,z_ind0,y0,del_f_y0,d_psi_d_y0,y_ind0 = partition_vars(n_vars,n_binding,variables0,del_f0,d_psi_d_x0,settings)
 
         # Compute reduced gradient
         if n_binding != 0:
@@ -762,7 +762,7 @@ def grg(f,g,x_start,settings):
             return c.OptimizerResult(f0,x0,True,return_message,iter,f.eval_calls.value,cstr_calls)
         
         # The search direction is opposite the direction of the reduced gradient
-        s = -del_f_r0/np.linalg.norm(del_f_r0)
+        s = -1*del_f_r0/np.linalg.norm(del_f_r0)
         if settings.verbose: print("Search Direction: {0}".format(s.T))
         
         # Conduct line search
@@ -790,7 +790,7 @@ def eval_constr(g,x1):
     return g1
 
 
-def partition_vars(n_vars,n_binding,variables0,del_f0,d_psi_d_x0):
+def partition_vars(n_vars,n_binding,variables0,del_f0,d_psi_d_x0,settings):
     """Partitions independent and dependent variables."""
     # Search for independent variables and determine gradients
     z0 = np.zeros((n_vars,1))
@@ -834,6 +834,7 @@ def partition_vars(n_vars,n_binding,variables0,del_f0,d_psi_d_x0):
     _,s,_ = np.linalg.svd(d_psi_d_y0) # Check that this matrix is not singular
     swap_var = 0
     while (abs(s)<1e-14).any():
+        if settings.verbose: print("Swapping independent and dependent variables.")
         tempind = copy.copy(z_ind0[n_binding+swap_var])
         z_ind0[n_binding+swap_var] = y_ind0[swap_var]
         y_ind0[swap_var] = tempind
@@ -923,7 +924,6 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
 
         min_ind = np.argmin(f_search)
         while (g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol):
-            print('stepping back')
             min_ind -= 1 # Step back to feasible space
     
         if min_ind == settings.n_search: # Minimum at end of line search, step size must be increased
@@ -967,13 +967,12 @@ def eval_search_point(f,g,z0,y0,alpha,s,d_psi_d_y0,d_psi_d_z0,z_ind0,y_ind0,n_va
             # Drive dependent variables back to the boundary of binding constraints which were violated (equality constraints are always binding).
             cstr_v = (cstr_b & ((g_search<settings.cstr_tol)|(np.array([i>=settings.n_ineq_cstr-1 for i in range(settings.n_cstr)]))))
             iterations = 0
-            while n_binding != 0 and (abs(g_search[cstr_v])>settings.cstr_tol/1000).any() and iterations<10000:
+            while n_binding != 0 and (abs(g_search[cstr_v])>settings.cstr_tol).any() and iterations<1000:
                 iterations += 1 # To avoid divergence of the N-R method
 
                 g_search[~cstr_v] = 0 # Binding, non-violated constraints should just be left alone
                 y_search = np.asarray(y_search+np.linalg.inv(d_psi_d_y0)*np.matrix(g_search[cstr_b]).T)
                 if n_binding != 0:
-                    y_search = y0-np.linalg.inv(d_psi_d_y0)*np.matrix(d_psi_d_z0)*np.matrix(alpha*s)
                     var_i = np.zeros(n_vars+n_binding)
                     var_i[z_ind0] = z_search.flatten()
                     var_i[y_ind0] = y_search.flatten()
@@ -1053,8 +1052,8 @@ def print_setup(n_vars,x_start,bounds,n_cstr,n_ineq_cstr,settings):
     print('{0} total constraints'.format(n_cstr))
     print('{0} inequality constraints'.format(n_ineq_cstr))
     print('{0} equality constraints'.format(n_cstr-n_ineq_cstr))
-    print('***Please note, your constraints will be rearranged so the inequality constraints are listed first.')
-    print('***Otherwise, the order is maintained')
+    print('***Please note, Optix will rearrange constraints so the inequality constraints are listed first.')
+    print('***Otherwise, the order is maintained.')
 
     print('\n---------- Settings ----------')
     print('            method: {0}'.format(settings.method))
