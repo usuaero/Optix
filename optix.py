@@ -722,9 +722,6 @@ def grg(f,g,x_start,settings):
     f0 = f.f(x0)
     g0 = eval_constr(g,x0)
 
-    #if (g0[:n_ineq_cstr]<-settings.cstr_tol).any() or (abs(g0[n_ineq_cstr:])>settings.cstr_tol).any():
-    #    raise ValueError("The initial point lies outside of feasible space!")
-
     while mag_dx > settings.termination_tol and iter < settings.max_iterations:
         iter += 1
         
@@ -736,7 +733,20 @@ def grg(f,g,x_start,settings):
         # Determine binding constraints
         cstr_b = np.reshape([list(g0[:n_ineq_cstr].flatten()<=settings.cstr_tol)+[True for i in range(n_cstr-n_ineq_cstr)]],(n_cstr,1)) # Equality constraints are always binding.
         n_binding = np.asscalar(sum(cstr_b))
+
+        # If there are more binding constraints than design variables, we must ignore some binding constraints to ensure linear independence.
+        # Equality constraints will never be ignored.
+        if n_binding > n_vars:
+            if settings.verbose: print("Ignoring {0} binding constraints.".format(n_binding-n_vars))
+            unbound = 0
+            for i in range(n_cstr):
+                if cstr_b[i] and unbound < n_binding-n_vars:
+                    cstr_b[i] = False
+                    unbound += 1
+        n_binding = np.asscalar(sum(cstr_b))
+
         if settings.verbose: print("{0} binding constraints".format(n_binding))
+
         d_psi_d_x0 = -del_g0.T[np.repeat(cstr_b,2,axis=1)].reshape((n_binding,n_vars))
         cstr_b = cstr_b.flatten()
         
@@ -801,12 +811,12 @@ def partition_vars(n_vars,n_binding,variables0,del_f0,d_psi_d_x0,settings):
     for i in range(n_vars):
         while True:
             var_ind += 1
-            if var_ind < n_binding and (abs(variables0[var_ind])<1e-4 or variables0[var_ind]<0): # Slack variable at limit
-                    z0[i] = variables0[var_ind]
-                    del_f_z0[i] = 0 # df/ds is always 0
-                    d_psi_d_z0[i,i] = 1 # dg/ds is always 1
-                    z_ind0.append(var_ind)
-                    break
+            if var_ind < n_binding:# and (abs(variables0[var_ind])<1e-4 or variables0[var_ind]<0): # Slack variable at limit
+                z0[i] = variables0[var_ind]
+                del_f_z0[i] = 0 # df/ds is always 0
+                d_psi_d_z0[i,i] = 1 # dg/ds is always 1
+                z_ind0.append(var_ind)
+                break
             else: # Design variable
                 z0[i] = variables0[var_ind]
                 del_f_z0[i] = del_f0[var_ind-n_binding]
@@ -923,7 +933,7 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
                 print("".join(msg))
 
         min_ind = np.argmin(f_search)
-        while (g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol):
+        while min_ind > 0 and (g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol).any():
             min_ind -= 1 # Step back to feasible space
     
         if min_ind == settings.n_search: # Minimum at end of line search, step size must be increased
