@@ -157,7 +157,7 @@ def minimize(fun,x0,**kwargs):
         
             alpha_mult(float,optional)
             - Factor by which alpha is adjusted during each iteration of the line
-            search. Defaults to n_search.
+            search. Defaults to n_search-1.
         
             line_search(string,optional)
             - Specifies which type of line search should be conducted in the search
@@ -208,11 +208,11 @@ def minimize(fun,x0,**kwargs):
         
             alpha_mult(float,optional)
             - Factor by which alpha is adjusted during each iteration of the line
-            search. Defaults to n_search.
+            search. Defaults to n_search - 1
 
             cstr_tol(float,optional)
             - A constraint is considered to be binding if it evaluates to less than this
-            number. Defaults to 1e-6.
+            number. Defaults to 1e-4.
     """
 
     #Initialize settings
@@ -747,7 +747,7 @@ def grg(f,g,x_start,settings):
 
         if settings.verbose: print("{0} binding constraints".format(n_binding))
 
-        d_psi_d_x0 = -del_g0.T[np.repeat(cstr_b,2,axis=1)].reshape((n_binding,n_vars))
+        d_psi_d_x0 = -del_g0.T[np.repeat(cstr_b,n_vars,axis=1)].reshape((n_binding,n_vars))
         cstr_b = cstr_b.flatten()
         
         # Add slack variables
@@ -933,15 +933,19 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
                 print("".join(msg))
 
         min_ind = np.argmin(f_search)
+        # If the starting point is within feasible space, keep the algorithm from stepping outside of feasible space. If the starting point is outside, let the minimum point
+        # exist as the first point outside of feasible space.
         while min_ind > 0 and (g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol).any():
             min_ind -= 1 # Step back to feasible space
+        if min_ind ==0 and (g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol).any():
+            min_ind += 1
     
         if min_ind == settings.n_search: # Minimum at end of line search, step size must be increased
             alpha *= settings.alpha_mult
             if settings.verbose: print("Minimum not found. Increasing step size.")
             continue
         if min_ind == 0: # Minimum at beginning of line search, step size must be reduced
-            alpha /= settings.alpha_mult/2
+            alpha /= settings.alpha_mult
             if settings.verbose: print("Minimum not found. Decreasing step size.")
             continue
         else: # Minimum is found in the middle of the line search
@@ -950,6 +954,9 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
             g1 = g_search[:,min_ind].reshape((settings.n_cstr,1))
             break
     else:
+        if len(x_search)==1:
+            raise RuntimeWarning("Failed to converge to one or more constraint boundaries.")
+            return x_search[0].reshape((n_vars,1)),f_search[0],g_search[0].reshape((settings.n_cstr,1))
         return x_search[:,0].reshape((n_vars,1)),f_search[0],g_search[:,0].reshape((settings.n_cstr,1))
 
     return x1,f1,g1
