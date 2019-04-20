@@ -12,8 +12,6 @@ mirror that of scipy.optimize. We continue working to improve the API and
 functionality of Optix. This README will always contain update information
 for using Optix.
 
-AS OF 2/22/2019, GRG FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
-
 AS OF 2/22/2019, BOUNDS FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
 
 Optix is a gradient-based optimization tool designed with aerodynamics
