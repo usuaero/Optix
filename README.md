@@ -73,7 +73,7 @@ Please note that optix should be imported first.
 The Optix package can be installed by navigating to the root directory of the project
 and using the following command
 
-   pip install
+   python setup.py install
 
 ### Getting the Source Code
 
