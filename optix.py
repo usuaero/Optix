@@ -28,7 +28,7 @@ def minimize(fun,x0,**kwargs):
                 return float
             where x is a vector of the design variables and *args is all
             other parameters necessary for calling the function. Note that
-            Optix will handle x as a column vector (i.e. shape(n_vars,1)).
+            Optix will pass x as a column vector (i.e. shape(n_vars,1)).
             This should be taken into consideration when writing fun().
         
             x0(array-like,shape(n,))
