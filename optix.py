@@ -120,8 +120,13 @@ def minimize(fun,x0,**kwargs):
             - Step size to be used in finite difference methods. Defaults to 0.001
         
             max_iterations(int,optional)
-            -Maximum number of iterations for the optimization algorithm. Defaults to
+            - Maximum number of iterations for the optimization algorithm. Defaults to
             inf.
+
+            num_avg(int,optional)
+            - Number of times to run the objective function at each point. The objective
+            value returned will be the average of all calls. This can be useful when
+            dealing with noisy models. Defaults to 1.
         
         Returns
         ------
@@ -943,9 +948,9 @@ def grg_line_search(s,z0,z_ind0,y0,y_ind0,f,f0,g,g0,cstr_b,alpha,d_psi_d_z0,d_ps
         min_ind = np.argmin(f_search)
         # If the starting point is within feasible space, keep the algorithm from stepping outside of feasible space. If the starting point is outside, let the minimum point
         # exist as the first point outside of feasible space.
-        while min_ind > 0 and (g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol).any():
+        while min_ind > 0 and ((g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol).any()):
             min_ind -= 1 # Step back to feasible space
-        if min_ind ==0 and (g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol).any():
+        if min_ind ==0 and ((g_search[:settings.n_ineq_cstr,min_ind]<-settings.cstr_tol).any() or (abs(g_search[settings.n_ineq_cstr:,min_ind])>settings.cstr_tol).any()):
             min_ind += 1
     
         if min_ind == settings.n_search: # Minimum at end of line search, step size must be increased

@@ -52,6 +52,7 @@ class Settings:
         self.max_processes = kwargs.get("max_processes",1)
         self.dx = kwargs.get("dx",0.01)
         self.max_iterations = kwargs.get("max_iterations",np.inf)
+        self.num_avg = kwargs.get("num_avg",1)
 
         self.use_finite_diff = kwargs.get("jac") == None
 
@@ -149,6 +150,7 @@ class Objective:
         self.central_diff = settings.central_diff
         self.max_processes = settings.max_processes
         self.dx = settings.dx
+        self.num_avg = settings.num_avg
         self.pool = pool
         self.queue = queue
         with self.eval_calls.get_lock():
@@ -156,14 +158,16 @@ class Objective:
 
     def f(self,x):
         n = len(x)
-        f_val = np.asscalar(self.fun(x,*self.args))
-        with self.eval_calls.get_lock():
-            self.eval_calls.value += 1
-        msg = "{0:>20}".format(f_val)
-        for value in x:
-            msg += ", {0:>20}".format(np.asscalar(value))
-        self.queue.put(msg)
-        return f_val
+        f_val = 0.0
+        for i in range(self.num_avg):
+            f_val += np.asscalar(self.fun(x,*self.args))
+            with self.eval_calls.get_lock():
+                self.eval_calls.value += 1
+            msg = "{0:>20}".format(f_val)
+            for value in x:
+                msg += ", {0:>20}".format(np.asscalar(value))
+            self.queue.put(msg)
+        return f_val/self.num_avg
 
     def del_f(self,x):
         if self.gr == None:
