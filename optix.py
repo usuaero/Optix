@@ -152,8 +152,9 @@ def minimize(fun,x0,**kwargs):
             8.
         
             alpha_d(float,optional)
-            - Step size to be used in line searches. If not specified, the step size
-            will be calculated from the predicted optimum of the approximation.
+            - Step size to be used in line searches. Defaults to 1/n_search for the first
+            iteration and the optimum step size from the previous iteration for all
+            subsequent iterations.
         
             alpha_mult(float,optional)
             - Factor by which alpha is adjusted during each iteration of the line
@@ -296,7 +297,6 @@ def bfgs(f,x_start,settings):
     """Performs quasi-Newton, unconstrained optimization"""
 
     # Initialize
-    if settings.verbose: print("Beginning simple unconstrained BFGS optimization.")
     iter = -1
     n = len(x_start)
     o_iter = -1
@@ -318,10 +318,9 @@ def bfgs(f,x_start,settings):
 
         # Determine search direction and perform line search
         s = -np.dot(N0,del_f0)
-        alpha_guess = alpha_from_s(s,settings.n_search)
+        alpha_guess = 1/settings.n_search
         mag_s = np.linalg.norm(s)
         s = s/mag_s
-        if settings.verbose: print("Predicted optimum alpha: {0}".format(mag_s))
         x1,f1,alpha,wolfe_satis = line_search(x0,f0,s,del_f0,f,alpha_guess,settings)
         delta_x0 = x1-x0
         mag_dx = alpha
@@ -342,6 +341,7 @@ def bfgs(f,x_start,settings):
             # Check second Wolfe condition. If not satisfied, reset BFGS update.
             if np.inner(delta_x0.T,del_f1.T) < settings.wolfe_curv*np.inner(delta_x0.T,del_f0.T):
                 print("Wolfe condition ii not satisfied (step did not result in a sufficient decrease in objective function gradient).")
+                x0 = x1
                 break
 
             # Update Hessian
@@ -349,11 +349,9 @@ def bfgs(f,x_start,settings):
 
             # Determine new search direction and perform line search
             s = -np.dot(N1,del_f1)
-            alpha_guess = alpha_from_s(s,settings.n_search)
             mag_s = np.linalg.norm(s)
             s = s/mag_s
-            if settings.verbose: print("Predicted optimum alpha: {0}".format(mag_s))
-            x2,f2,alpha,wolfe_satis = line_search(x1,f1,s,del_f1,f,alpha_guess,settings)
+            x2,f2,alpha,wolfe_satis = line_search(x1,f1,s,del_f1,f,mag_dx,settings)
             if not wolfe_satis: # Check first Wolfe condition. If not satisfied, reset BFGS update.
                 x0 = x2
                 print("Wolfe condition i not satisfied (step did not result in a sufficient decrease in the objective function).")
@@ -370,10 +368,6 @@ def bfgs(f,x_start,settings):
             f1 = f2
 
     return c.OptimizerResult(f2,x2,True,"Step tolerance reached.",iter,f.eval_calls.value)
-
-def alpha_from_s(s,n_search):
-    """Sets predicted optimum in the middle of the line search."""
-    return np.linalg.norm(s)*2/n_search
 
 def get_N(N0,delta_x0,del_f0,del_f1):
     """Perform BFGS update on N matrix"""
@@ -396,10 +390,12 @@ def line_search(x0,f0,s,del_f0,f,alpha,settings):
 
     if settings.alpha_d is not None:
         alpha = settings.alpha_d
-
-    if settings.verbose: print('Initial step size: {0}'.format(alpha))
+    
+    prev_reduced = False
+    prev_increased = False
 
     while True:
+        if settings.verbose: print("Step size: {0}".format(alpha))
 
         # Get objective function values in the line search
         x_search = [x0+s*alpha*i for i in range(1,settings.n_search+1)]
@@ -434,11 +430,23 @@ def line_search(x0,f0,s,del_f0,f,alpha,settings):
         # See if alpha needs to be adjusted
         min_ind = f_search.index(min(f_search))
         if min_ind == 0:
-            if settings.verbose: print('Too big of a step. Reducing alpha by {0}'.format(settings.alpha_mult))
-            alpha /= settings.alpha_mult
+            if prev_increased:
+                multiplier = settings.alpha_mult-1
+                prev_increased = False
+            else:
+                multiplier = settings.alpha_mult
+                prev_reduced = True
+            if settings.verbose: print('Too big of a step. Reducing alpha by {0}'.format(multiplier))
+            alpha /= multiplier
         elif min_ind == settings.n_search:
-            if settings.verbose: print('Too small of a step. Increasing alpha by {0}'.format(settings.alpha_mult))
-            alpha *= settings.alpha_mult
+            if prev_reduced:
+                multiplier = settings.alpha_mult-1
+                prev_reduced = False
+            else:
+                multiplier = settings.alpha_mult
+                prev_increased = True
+            if settings.verbose: print('Too small of a step. Increasing alpha by {0}'.format(multiplier))
+            alpha *= multiplier
         else:
             break
     
