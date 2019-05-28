@@ -31,6 +31,8 @@ def minimize(fun, x0, **kwargs):
             other parameters necessary for calling the function. Note that
             Optix will pass x as a column vector (i.e. shape(n_vars,1)).
             This should be taken into consideration when writing fun().
+            If fun() expects to be passed x as a row vector, this will
+            likely result in a "list index out of range" error.
 
             x0(array-like,shape(n,))
             - A starting guess for the independent variables. May be
