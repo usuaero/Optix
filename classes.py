@@ -160,7 +160,10 @@ class Objective:
         n = len(x)
         f_val = 0.0
         for i in range(self.num_avg):
-            f_val += np.asscalar(self.fun(x,*self.args))
+            try:
+                f_val += np.asscalar(self.fun(x,*self.args))
+            except:
+                f_val += self.fun(x,*self.args)
             with self.eval_calls.get_lock():
                 self.eval_calls.value += 1
             msg = "{0:>20}".format(f_val)
