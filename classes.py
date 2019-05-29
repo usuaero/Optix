@@ -162,7 +162,7 @@ class Objective:
         for i in range(self.num_avg):
             try:
                 f_val += np.asscalar(self.fun(x,*self.args))
-            except:
+            except AttributeError:
                 f_val += self.fun(x,*self.args)
             with self.eval_calls.get_lock():
                 self.eval_calls.value += 1
