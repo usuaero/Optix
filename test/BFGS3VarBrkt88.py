@@ -7,7 +7,7 @@ import traceback
 message = []
 try:
     def f(x):
-        return x[0]**4-2*x[1]*x[0]**2+x[1]**2+x[0]**2-2*x[0]+5
+        return np.asscalar(x[0]**4-2*x[1]*x[0]**2+x[1]**2+x[0]**2-2*x[0]+5)
     
     x0 = [-10+20*random(),-10+20*random()]
     

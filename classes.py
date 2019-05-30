@@ -166,11 +166,12 @@ class Objective:
                 f_val += self.fun(x,*self.args)
             with self.eval_calls.get_lock():
                 self.eval_calls.value += 1
-            msg = "{0:>20}".format(f_val)
-            for value in x:
-                msg += ", {0:>20}".format(np.asscalar(value))
-            self.queue.put(msg)
-        return f_val/self.num_avg
+        f_val = f_val/self.num_avg
+        msg = "{0:>20}".format(f_val)
+        for value in x:
+            msg += ", {0:>20}".format(np.asscalar(value))
+        self.queue.put(msg)
+        return f_val
 
     def del_f(self,x):
         if self.gr == None:
