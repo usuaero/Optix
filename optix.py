@@ -29,10 +29,8 @@ def minimize(fun, x0, **kwargs):
                 return float
             where x is a vector of the design variables and *args is all
             other parameters necessary for calling the function. Note that
-            Optix will pass x as a column vector (i.e. shape(n_vars,1)).
+            Optix will pass x as a column matrix (i.e. shape(n_vars,1)).
             This should be taken into consideration when writing fun().
-            If fun() expects to be passed x as a row vector, this will
-            likely result in a "list index out of range" error.
 
             x0(array-like,shape(n,))
             - A starting guess for the independent variables. May be
@@ -312,7 +310,7 @@ def bfgs(f, x_start, settings):
     n = len(x_start)
     o_iter = -1
     mag_dx = 1
-    x0 = np.copy(x_start)
+    x0 = np.asmatrix(np.copy(x_start))
 
     # Outer loop. Sets the N matrix to [I].
     while iter < settings.max_iterations and mag_dx > settings.termination_tol:
