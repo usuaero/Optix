@@ -834,8 +834,7 @@ def _grg(f, g, x_start, settings):
             cstr_calls = []
             for i in range(n_cstr):
                 cstr_calls.append(g[i].eval_calls.value)
-            return_message = "Gradient termination tolerance reached (magnitude = {0}).".format(
-                np.linalg.norm(del_f_r0))
+            return_message = "Gradient termination tolerance reached (magnitude = {0}).".format(np.linalg.norm(del_f_r0))
             return c.OptimizerResult(f0, x0, True, return_message, iter, f.eval_calls.value, cstr_calls)
 
         # The search direction is opposite the direction of the reduced gradient
@@ -844,8 +843,13 @@ def _grg(f, g, x_start, settings):
             print("Search Direction: {0}".format(s.T))
 
         # Conduct line search
-        x1, f1, g1 = _grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b,
-                                     mag_dx, d_psi_d_z0, d_psi_d_y0, n_vars, n_cstr, n_binding, settings)
+        x1, f1, g1, err = _grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b, mag_dx, d_psi_d_z0, d_psi_d_y0, n_vars, n_cstr, n_binding, settings)
+        if err is -1:
+            cstr_calls = []
+            for i in range(n_cstr):
+                cstr_calls.append(g[i].eval_calls.value)
+            return_message = "Failed to converge to one or more constraint boundaries."
+            return c.OptimizerResult(f1, x1, False, return_message, iter, f.eval_calls.value, cstr_calls)
 
         delta_x = x1-x0
         mag_dx = np.linalg.norm(delta_x)
@@ -854,12 +858,12 @@ def _grg(f, g, x_start, settings):
         g0 = g1
 
     del_f0, del_g0 = _eval_grad(x0, f, g, n_vars, n_cstr)
-    _append_file(iter+1, iter+1, iter+1, f0, mag_dx, x0,
-                del_f0, settings, g=g0, del_g=del_g0)
+    _append_file(iter+1, iter+1, iter+1, f0, mag_dx, x0, del_f0, settings, g=g0, del_g=del_g0)
     cstr_calls = []
     for i in range(n_cstr):
         cstr_calls.append(g[i].eval_calls.value)
-    return c.OptimizerResult(f1, x1, True, "Step termination tolerance reached (magnitude = {0}).".format(mag_dx), iter, f.eval_calls.value, cstr_calls)
+    return_message = "Step termination tolerance reached (magnitude = {0}).".format(mag_dx)
+    return c.OptimizerResult(f1, x1, True, return_message, iter, f.eval_calls.value, cstr_calls)
 
 
 def _eval_constr(g, x1):
@@ -1033,12 +1037,10 @@ def _grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b, alpha, d_p
             break
     else:
         if len(x_search) == 1:
-            raise RuntimeWarning(
-                "Failed to converge to one or more constraint boundaries.")
-            return x_search[0].reshape((n_vars, 1)), f_search[0], g_search[0].reshape((settings.n_cstr, 1))
-        return x_search[:, 0].reshape((n_vars, 1)), f_search[0], g_search[:, 0].reshape((settings.n_cstr, 1))
+            return x_search[0].reshape((n_vars, 1)), f_search[0], g_search[0].reshape((settings.n_cstr, 1)), -1
+        return x_search[:, 0].reshape((n_vars, 1)), f_search[0], g_search[:, 0].reshape((settings.n_cstr, 1)), 1
 
-    return x1, f1, g1
+    return x1, f1, g1, 1
 
 
 def _eval_search_point(f, g, z0, y0, alpha, s, d_psi_d_y0, d_psi_d_z0, z_ind0, y_ind0, n_vars, n_binding, cstr_b, settings):
