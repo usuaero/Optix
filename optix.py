@@ -16,7 +16,6 @@ np.seterr(all='warn')
 
 zero = 1.0e-20
 
-
 def minimize(fun, x0, **kwargs):
     """Minimize a scalar function in one or more variables
 
@@ -241,7 +240,7 @@ def minimize(fun, x0, **kwargs):
         f = c.Objective(fun, pool, queue, settings, grad=grad, hess=hess)
 
         # Initialize constraints
-        g, n_cstr, n_ineq_cstr = get_constraints(
+        g, n_cstr, n_ineq_cstr = _get_constraints(
             kwargs.get("constraints"), pool, queue, settings)
         settings.n_cstr = n_cstr
         settings.n_ineq_cstr = n_ineq_cstr
@@ -252,10 +251,10 @@ def minimize(fun, x0, **kwargs):
             raise ValueError("The problem is overconstrained.")
 
         # Print setup information to command line
-        print_setup(n_vars, x_start, bounds, n_cstr, n_ineq_cstr, settings)
+        _print_setup(n_vars, x_start, bounds, n_cstr, n_ineq_cstr, settings)
 
         # Initialize formatting of output files
-        format_output_files(n_vars, n_cstr, settings, pool, queue)
+        _format_output_files(n_vars, n_cstr, settings, pool, queue)
 
         # Kick off evaluation storage process (for more than one process)
         if settings.max_processes > 1:
@@ -265,10 +264,10 @@ def minimize(fun, x0, **kwargs):
             eval_filename = "evaluations"+settings.file_tag+".txt"
 
             writer = pool.apply_async(
-                eval_write, (eval_filename, eval_header, queue))
+                _eval_write, (eval_filename, eval_header, queue))
 
         # Drive to the minimum
-        opt = find_minimum(f, g, x_start, settings)
+        opt = _find_minimum(f, g, x_start, settings)
 
         # Kick off evaluation storage process (for only one process)
         if settings.max_processes == 1:
@@ -278,7 +277,7 @@ def minimize(fun, x0, **kwargs):
             eval_filename = "evaluations"+settings.file_tag+".txt"
 
             writer = pool.apply_async(
-                eval_write, (eval_filename, eval_header, queue))
+                _eval_write, (eval_filename, eval_header, queue))
 
         # Kill evaluation printer process
         queue.put('kill')
@@ -291,19 +290,19 @@ def minimize(fun, x0, **kwargs):
     return opt
 
 
-def find_minimum(f, g, x_start, settings):
+def _find_minimum(f, g, x_start, settings):
     """Calls specific optimization algorithm as needed"""
     if settings.method == "bfgs":
-        return bfgs(f, x_start, settings)
+        return _bfgs(f, x_start, settings)
     elif settings.method == "sqp":
-        return sqp(f, g, x_start, settings)
+        return _sqp(f, g, x_start, settings)
     elif settings.method == "grg":
-        return grg(f, g, x_start, settings)
+        return _grg(f, g, x_start, settings)
     else:
         raise ValueError("Method improperly specified.")
 
 
-def bfgs(f, x_start, settings):
+def _bfgs(f, x_start, settings):
     """Performs quasi-Newton, unconstrained optimization"""
 
     # Initialize
@@ -324,7 +323,7 @@ def bfgs(f, x_start, settings):
         f0_eval = f.pool.apply_async(f.f, (x0,))
         del_f0 = f.del_f(x0)
         f0 = f0_eval.get()
-        append_file(iter, o_iter, i_iter, f0, 0.0, x0, del_f0, settings)
+        _append_file(iter, o_iter, i_iter, f0, 0.0, x0, del_f0, settings)
         N0 = np.eye(n)*settings.hess_init
 
         # Determine search direction and perform line search
@@ -332,7 +331,7 @@ def bfgs(f, x_start, settings):
         alpha_guess = 1/settings.n_search
         mag_s = np.linalg.norm(s)
         s = s/mag_s
-        x1, f1, alpha, wolfe_satis = line_search(x0, f0, s, del_f0, f, alpha_guess, settings)
+        x1, f1, alpha, wolfe_satis = _line_search(x0, f0, s, del_f0, f, alpha_guess, settings)
         delta_x0 = x1-x0
         mag_dx = alpha
 
@@ -343,7 +342,7 @@ def bfgs(f, x_start, settings):
 
             # Update gradient and output file
             del_f1 = f.del_f(x1)
-            append_file(iter, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings)
+            _append_file(iter, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings)
 
             # Check for gradient termination
             if np.linalg.norm(del_f1) < settings.grad_tol:
@@ -356,13 +355,13 @@ def bfgs(f, x_start, settings):
                 break
 
             # Update Hessian
-            N1 = get_N(N0, delta_x0, del_f0, del_f1)
+            N1 = _get_N(N0, delta_x0, del_f0, del_f1)
 
             # Determine new search direction and perform line search
             s = -np.dot(N1, del_f1)
             mag_s = np.linalg.norm(s)
             s = s/mag_s
-            x2, f2, alpha, wolfe_satis = line_search(x1, f1, s, del_f1, f, mag_dx, settings)
+            x2, f2, alpha, wolfe_satis = _line_search(x1, f1, s, del_f1, f, mag_dx, settings)
             if not wolfe_satis:  # Check first Wolfe condition. If not satisfied, reset BFGS update.
                 x0 = x2
                 print("Wolfe condition i not satisfied (step did not result in a sufficient decrease in the objective function).")
@@ -381,7 +380,7 @@ def bfgs(f, x_start, settings):
     return c.OptimizerResult(f2, x2, True, "Step tolerance reached.", iter, f.eval_calls.value)
 
 
-def get_N(N0, delta_x0, del_f0, del_f1):
+def _get_N(N0, delta_x0, del_f0, del_f1):
     """Perform BFGS update on N matrix"""
     gamma0 = del_f1-del_f0
     denom = np.matrix(delta_x0).T*np.matrix(gamma0)
@@ -394,7 +393,7 @@ def get_N(N0, delta_x0, del_f0, del_f1):
     return np.asarray(N1)
 
 
-def line_search(x0, f0, s, del_f0, f, alpha, settings):
+def _line_search(x0, f0, s, del_f0, f, alpha, settings):
     """Perform line search to find a minimum in the objective function."""
 
     if settings.verbose:
@@ -473,7 +472,7 @@ def line_search(x0, f0, s, del_f0, f, alpha, settings):
 
     # Find value of alpha at the optimum point in the search direction
     a = [alpha*i for i in range(settings.n_search+1)]
-    alpha_opt = find_opt_alpha(a, f_search, min_ind, settings)
+    alpha_opt = _find_opt_alpha(a, f_search, min_ind, settings)
     if settings.verbose:
         print('Final alpha = {0}'.format(alpha_opt))
     x1 = x0+s*alpha_opt
@@ -488,7 +487,7 @@ def line_search(x0, f0, s, del_f0, f, alpha, settings):
     return x1, f1, alpha_opt, wolfe_satis
 
 
-def find_opt_alpha(a, f_search, min_ind, settings):
+def _find_opt_alpha(a, f_search, min_ind, settings):
     # Quadratic method
     if settings.search_type == 'quadratic':
 
@@ -515,7 +514,7 @@ def find_opt_alpha(a, f_search, min_ind, settings):
     return alpha_opt
 
 
-def sqp(f, g, x_start, settings):
+def _sqp(f, g, x_start, settings):
     """Performs Sequntial Quadratic Programming on a constrained optimization function."""
 
     # Initialization
@@ -538,12 +537,11 @@ def sqp(f, g, x_start, settings):
 
         # Create quadratic approximation
         f0_eval = f.pool.apply_async(f.f, (x0,))
-        g0 = eval_constr(g, x0)
-        del_f0, del_g0 = eval_grad(x0, f, g, n_vars, n_cstr)
+        g0 = _eval_constr(g, x0)
+        del_f0, del_g0 = _eval_grad(x0, f, g, n_vars, n_cstr)
         del_2_L0 = np.eye(n_vars)*settings.hess_init
         f0 = f0_eval.get()
-        append_file(iter, o_iter, i_iter, f0, 0.0, x0,
-                    del_f0, settings, g=g0, del_g=del_g0)
+        _append_file(iter, o_iter, i_iter, f0, 0.0, x0, del_f0, settings, g=g0, del_g=del_g0)
 
         # Estimate initial penalty function. We allow this to be artificially high.
         P0 = np.copy(f0)
@@ -552,7 +550,7 @@ def sqp(f, g, x_start, settings):
                 P0 -= constr
 
         # Get step
-        delta_x, l, x1, f1, g1, P1 = get_delta_x(
+        delta_x, l, x1, f1, g1, P1 = _get_delta_x(
             x0, f0, f, g, P0, n_vars, n_cstr, n_ineq_cstr, del_2_L0, del_f0, del_g0, g0, settings)
 
         mag_dx = np.linalg.norm(delta_x)
@@ -564,7 +562,7 @@ def sqp(f, g, x_start, settings):
             i_iter += 1
 
             # Create quadratic approximation
-            del_f1, del_g1 = eval_grad(x1, f, g, n_vars, n_cstr)
+            del_f1, del_g1 = _eval_grad(x1, f, g, n_vars, n_cstr)
 
             # Check gradient termination
             if np.linalg.norm(del_f1) < settings.grad_tol:
@@ -574,15 +572,12 @@ def sqp(f, g, x_start, settings):
                 return OptimizerResult(f1, x1, True, "Gradient termination tolerance reached.", iter, f.eval_calls.value, cstr_calls)
 
             # Update the Lagrangian Hessain
-            del_2_L1 = get_del_2_L(
-                del_2_L0, del_f0, del_f1, l, del_g0, del_g1, n_vars, n_cstr, delta_x)
+            del_2_L1 = _get_del_2_L(del_2_L0, del_f0, del_f1, l, del_g0, del_g1, n_vars, n_cstr, delta_x)
 
-            append_file(iter, o_iter, i_iter, f1, mag_dx, x1,
-                        del_f1, settings, g=g1, del_g=del_g1)
+            _append_file(iter, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings, g=g1, del_g=del_g1)
 
             # Get step
-            delta_x, l, x2, f2, g2, P2 = get_delta_x(
-                x1, f1, f, g, P1, n_vars, n_cstr, n_ineq_cstr, del_2_L1, del_f1, del_g1, g1, settings)
+            delta_x, l, x2, f2, g2, P2 = _get_delta_x(x1, f1, f, g, P1, n_vars, n_cstr, n_ineq_cstr, del_2_L1, del_f1, del_g1, g1, settings)
 
             # Setup variables for next iterations
             x0 = x1
@@ -615,7 +610,7 @@ def sqp(f, g, x_start, settings):
     del_g1 = np.zeros((n_vars, n_cstr))
     for i in range(n_cstr):
         del_g1[:, i] = g[i].del_g(x1).flatten()
-    append_file(iter, o_iter, i_iter, f1, mag_dx, x1,
+    _append_file(iter, o_iter, i_iter, f1, mag_dx, x1,
                 del_f1, settings, g=g1, del_g=del_g1)
     cstr_calls = []
     for i in range(n_cstr):
@@ -623,7 +618,7 @@ def sqp(f, g, x_start, settings):
     return c.OptimizerResult(f1, x1, True, "Step termination tolerance reached.", iter, f.eval_calls.value, cstr_calls)
 
 
-def eval_grad(x0, f, g, n_vars, n_cstr):
+def _eval_grad(x0, f, g, n_vars, n_cstr):
     # Evaluate gradients at specified point
     del_f0 = f.del_f(x0)
     del_g0 = np.zeros((n_vars, n_cstr))
@@ -632,7 +627,7 @@ def eval_grad(x0, f, g, n_vars, n_cstr):
     return del_f0, del_g0
 
 
-def get_del_2_L(del_2_L0, del_f0, del_f1, l, del_g0, del_g1, n_vars, n_cstr, delta_x):
+def _get_del_2_L(del_2_L0, del_f0, del_f1, l, del_g0, del_g1, n_vars, n_cstr, delta_x):
     # BFGS update for Lagrangian Hessian
     del_L0 = np.copy(del_f0)
     del_L1 = np.copy(del_f1)
@@ -646,7 +641,7 @@ def get_del_2_L(del_2_L0, del_f0, del_f1, l, del_g0, del_g1, n_vars, n_cstr, del
     return np.asarray(del_2_L0+first-second)
 
 
-def get_delta_x(x0, f0, f, g, P0, n_vars, n_cstr, n_ineq_cstr, del_2_L0, del_f0, del_g0, g0, settings):
+def _get_delta_x(x0, f0, f, g, P0, n_vars, n_cstr, n_ineq_cstr, del_2_L0, del_f0, del_g0, g0, settings):
     # Solve for delta_x and lambda given each possible combination of binding/non-binding constraints
     if settings.verbose:
         print("Penalty to beat: {0}".format(P0))
@@ -668,11 +663,11 @@ def get_delta_x(x0, f0, f, g, P0, n_vars, n_cstr, n_ineq_cstr, del_2_L0, del_f0,
             if (abs(s) < 1e-14).any():
                 continue
 
-        delta_x, l = get_x_lambda(
+        delta_x, l = _get_x_lambda(
             n_vars, n_cstr, del_2_L0, del_g0, del_f0, g0, cstr_b)
 
         x1 = x0+delta_x
-        g1 = eval_constr(g, x1)
+        g1 = _eval_constr(g, x1)
         # Do not allow non-binding constraints to be violated.
         if (g1[cstr_b == False] < 0).any():
             continue
@@ -699,11 +694,11 @@ def get_delta_x(x0, f0, f, g, P0, n_vars, n_cstr, n_ineq_cstr, del_2_L0, del_f0,
                 if (abs(s) < 1e-14).any():
                     continue
 
-            delta_x, l = get_x_lambda(
+            delta_x, l = _get_x_lambda(
                 n_vars, n_cstr, del_2_L0, del_g0, del_f0, g0, cstr_b)
 
             x1 = x0+delta_x
-            g1 = eval_constr(g, x1)
+            g1 = _eval_constr(g, x1)
 
             # Check if constraints assumed to be binding are actually non-binding.
             if not (l[:n_ineq_cstr].flatten() < 0).any():
@@ -731,7 +726,7 @@ def get_delta_x(x0, f0, f, g, P0, n_vars, n_cstr, n_ineq_cstr, del_2_L0, del_f0,
         x1 = x0+delta_x
         f1 = f.f(x1)
         P1 = np.copy(f1)
-        g1 = eval_constr(g, x1)
+        g1 = _eval_constr(g, x1)
         for i in range(n_cstr):
             if i < n_ineq_cstr:
                 if g1[i] > 0:  # We may have stepped back across a constraint, meaning it should no longer affect the penalty function
@@ -747,7 +742,7 @@ def get_delta_x(x0, f0, f, g, P0, n_vars, n_cstr, n_ineq_cstr, del_2_L0, del_f0,
     return delta_x, l, x1, f1, g1, P1
 
 
-def get_x_lambda(n_vars, n_cstr, del_2_L0, del_g0, del_f0, g0, cstr_b):
+def _get_x_lambda(n_vars, n_cstr, del_2_L0, del_g0, del_f0, g0, cstr_b):
     n_bind = np.asscalar(sum(cstr_b))  # Number of binding constraints
 
     # Create linear system to solve for delta_x and lambda
@@ -768,7 +763,7 @@ def get_x_lambda(n_vars, n_cstr, del_2_L0, del_g0, del_f0, g0, cstr_b):
     return delta_x, l
 
 
-def grg(f, g, x_start, settings):
+def _grg(f, g, x_start, settings):
     """Performs Generalized Reduced Gradient optimization on a constrained optimization function."""
 
     # Initialization
@@ -780,15 +775,15 @@ def grg(f, g, x_start, settings):
     x0 = np.copy(x_start)
     mag_dx = 1  # Ensures the loop executes at least once
     f0 = f.f(x0)
-    g0 = eval_constr(g, x0)
+    g0 = _eval_constr(g, x0)
 
     while mag_dx > settings.termination_tol and iter < settings.max_iterations:
         iter += 1
 
         # Evaluate current point
-        del_f0, del_g0 = eval_grad(x0, f, g, n_vars, n_cstr)
+        del_f0, del_g0 = _eval_grad(x0, f, g, n_vars, n_cstr)
 
-        append_file(iter, iter, iter, f0, mag_dx, x0,
+        _append_file(iter, iter, iter, f0, mag_dx, x0,
                     del_f0, settings, g=g0, del_g=del_g0)
 
         # Determine binding constraints
@@ -824,7 +819,7 @@ def grg(f, g, x_start, settings):
         variables0 = np.concatenate((s0, x0), axis=0)
 
         # Partition variables
-        z0, del_f_z0, d_psi_d_z0, z_ind0, y0, del_f_y0, d_psi_d_y0, y_ind0 = partition_vars(
+        z0, del_f_z0, d_psi_d_z0, z_ind0, y0, del_f_y0, d_psi_d_y0, y_ind0 = _partition_vars(
             n_vars, n_binding, variables0, del_f0, d_psi_d_x0, settings)
 
         # Compute reduced gradient
@@ -849,7 +844,7 @@ def grg(f, g, x_start, settings):
             print("Search Direction: {0}".format(s.T))
 
         # Conduct line search
-        x1, f1, g1 = grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b,
+        x1, f1, g1 = _grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b,
                                      mag_dx, d_psi_d_z0, d_psi_d_y0, n_vars, n_cstr, n_binding, settings)
 
         delta_x = x1-x0
@@ -858,8 +853,8 @@ def grg(f, g, x_start, settings):
         f0 = f1
         g0 = g1
 
-    del_f0, del_g0 = eval_grad(x0, f, g, n_vars, n_cstr)
-    append_file(iter+1, iter+1, iter+1, f0, mag_dx, x0,
+    del_f0, del_g0 = _eval_grad(x0, f, g, n_vars, n_cstr)
+    _append_file(iter+1, iter+1, iter+1, f0, mag_dx, x0,
                 del_f0, settings, g=g0, del_g=del_g0)
     cstr_calls = []
     for i in range(n_cstr):
@@ -867,7 +862,7 @@ def grg(f, g, x_start, settings):
     return c.OptimizerResult(f1, x1, True, "Step termination tolerance reached (magnitude = {0}).".format(mag_dx), iter, f.eval_calls.value, cstr_calls)
 
 
-def eval_constr(g, x1):
+def _eval_constr(g, x1):
     n_cstr = len(g)
     g1 = np.zeros(n_cstr)
     for i in range(n_cstr):
@@ -875,7 +870,7 @@ def eval_constr(g, x1):
     return g1
 
 
-def partition_vars(n_vars, n_binding, variables0, del_f0, d_psi_d_x0, settings):
+def _partition_vars(n_vars, n_binding, variables0, del_f0, d_psi_d_x0, settings):
     """Partitions independent and dependent variables."""
     # Search for independent variables and determine gradients
     z0 = np.zeros((n_vars, 1))
@@ -946,7 +941,7 @@ def partition_vars(n_vars, n_binding, variables0, del_f0, d_psi_d_x0, settings):
     return z0, del_f_z0, d_psi_d_z0, z_ind0, y0, del_f_y0, d_psi_d_y0, y_ind0
 
 
-def grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b, alpha, d_psi_d_z0, d_psi_d_y0, n_vars, n_cstr, n_binding, settings):
+def _grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b, alpha, d_psi_d_z0, d_psi_d_y0, n_vars, n_cstr, n_binding, settings):
     """Performs line search in independent variables to find a minimum."""
     if settings.verbose:
         print("Line Search------------------------------")
@@ -983,7 +978,7 @@ def grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b, alpha, d_ps
 
         point_evals = []
         for i in range(1, settings.n_search+1):
-            point_evals.append(f.pool.apply_async(eval_search_point, (f, g, z0, y0, alpha*i,
+            point_evals.append(f.pool.apply_async(_eval_search_point, (f, g, z0, y0, alpha*i,
                                                                       s, d_psi_d_y0, d_psi_d_z0, z_ind0, y_ind0, n_vars, n_binding, cstr_b, settings)))
         for i in range(1, settings.n_search+1):
             point_vals = point_evals[i-1].get()
@@ -1046,7 +1041,7 @@ def grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b, alpha, d_ps
     return x1, f1, g1
 
 
-def eval_search_point(f, g, z0, y0, alpha, s, d_psi_d_y0, d_psi_d_z0, z_ind0, y_ind0, n_vars, n_binding, cstr_b, settings):
+def _eval_search_point(f, g, z0, y0, alpha, s, d_psi_d_y0, d_psi_d_z0, z_ind0, y_ind0, n_vars, n_binding, cstr_b, settings):
 
     with warnings.catch_warnings():
         warnings.filterwarnings('error', category=RuntimeWarning)
@@ -1064,7 +1059,7 @@ def eval_search_point(f, g, z0, y0, alpha, s, d_psi_d_y0, d_psi_d_z0, z_ind0, y_
             x_search = var_i[n_binding:]
 
             # Evaluate constraints
-            g_search = eval_constr(g, x_search)
+            g_search = _eval_constr(g, x_search)
 
             # Drive dependent variables back to the boundary of binding constraints which were violated (equality constraints are always binding).
             cstr_v = (cstr_b & ((g_search < settings.cstr_tol) | (
@@ -1085,7 +1080,7 @@ def eval_search_point(f, g, z0, y0, alpha, s, d_psi_d_y0, d_psi_d_z0, z_ind0, y_
                     var_i = z0
                 x_search = np.asarray(var_i[n_binding:]).flatten()
 
-                g_search = eval_constr(g, x_search)
+                g_search = _eval_constr(g, x_search)
 
             f_search = f.f(x_search)
             return np.asarray(x_search).flatten(), f_search, np.asarray(g_search).flatten()
@@ -1093,7 +1088,7 @@ def eval_search_point(f, g, z0, y0, alpha, s, d_psi_d_y0, d_psi_d_z0, z_ind0, y_
             return None
 
 
-def get_constraints(constraints, pool, queue, settings):
+def _get_constraints(constraints, pool, queue, settings):
     if constraints != None:
         n_cstr = len(constraints)
         n_ineq_cstr = 0
@@ -1120,7 +1115,7 @@ def get_constraints(constraints, pool, queue, settings):
     return g, n_cstr, n_ineq_cstr
 
 
-def append_file(iter, o_iter, i_iter, obj_fcn_value, mag_dx, design_point, gradient, settings, **kwargs):
+def _append_file(iter, o_iter, i_iter, obj_fcn_value, mag_dx, design_point, gradient, settings, **kwargs):
     g = kwargs.get("g")
     del_g = kwargs.get("del_g")
 
@@ -1150,7 +1145,7 @@ def append_file(iter, o_iter, i_iter, obj_fcn_value, mag_dx, design_point, gradi
         print(grad_msg, file=grad_file)
 
 
-def print_setup(n_vars, x_start, bounds, n_cstr, n_ineq_cstr, settings):
+def _print_setup(n_vars, x_start, bounds, n_cstr, n_ineq_cstr, settings):
     print("\nOptix.py from USU AeroLab")
 
     print('\n---------- Variables ----------')
@@ -1183,7 +1178,7 @@ def print_setup(n_vars, x_start, bounds, n_cstr, n_ineq_cstr, settings):
     print('')
 
 
-def eval_write(filename, header, q):
+def _eval_write(filename, header, q):
     with open(filename, 'w') as f:
         f.write(header+"\n")
         f.flush()
@@ -1199,7 +1194,7 @@ def eval_write(filename, header, q):
     return True
 
 
-def format_output_files(n_vars, n_cstr, settings, pool, queue):
+def _format_output_files(n_vars, n_cstr, settings, pool, queue):
     opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}'.format(
         'iter', 'outer', 'inner', 'fitness', 'mag(dx)')
     for i in range(n_vars):
