@@ -29,7 +29,7 @@ def minimize(fun, x0, **kwargs):
                 return float
             where x is a vector of the design variables and *args is all
             other parameters necessary for calling the function. Note that
-            Optix will pass x as a numpy column matrix (i.e. shape(n_vars,1)).
+            Optix will pass x as a numpy column vector (i.e. shape(n_vars,1)).
             This should be taken into consideration when writing fun().
 
             x0(array-like,shape(n,))
@@ -69,7 +69,8 @@ def minimize(fun, x0, **kwargs):
             bounds(sequence of tuple,optional)
             - Bounds on independent variables. Can only be used with constrained
             methods. Should be a sequence of (min,max) pairs for each element in
-            x. Use -numpy.inf or numpy.inf to specify mo bound.
+            x. Use -numpy.inf or numpy.inf to specify no bound.
+            NOTE: NOT CURRENTLY IMPLEMENTED
 
             constraints(list of {Constraint,dict}, optional)
             - Constraints on the design space. Can only be used with constrained
@@ -310,7 +311,7 @@ def bfgs(f, x_start, settings):
     n = len(x_start)
     o_iter = -1
     mag_dx = 1
-    x0 = np.asmatrix(np.copy(x_start))
+    x0 = np.asarray(np.copy(x_start))
 
     # Outer loop. Sets the N matrix to [I].
     while iter < settings.max_iterations and mag_dx > settings.termination_tol:
@@ -331,8 +332,7 @@ def bfgs(f, x_start, settings):
         alpha_guess = 1/settings.n_search
         mag_s = np.linalg.norm(s)
         s = s/mag_s
-        x1, f1, alpha, wolfe_satis = line_search(
-            x0, f0, s, del_f0, f, alpha_guess, settings)
+        x1, f1, alpha, wolfe_satis = line_search(x0, f0, s, del_f0, f, alpha_guess, settings)
         delta_x0 = x1-x0
         mag_dx = alpha
 
@@ -362,12 +362,10 @@ def bfgs(f, x_start, settings):
             s = -np.dot(N1, del_f1)
             mag_s = np.linalg.norm(s)
             s = s/mag_s
-            x2, f2, alpha, wolfe_satis = line_search(
-                x1, f1, s, del_f1, f, mag_dx, settings)
+            x2, f2, alpha, wolfe_satis = line_search(x1, f1, s, del_f1, f, mag_dx, settings)
             if not wolfe_satis:  # Check first Wolfe condition. If not satisfied, reset BFGS update.
                 x0 = x2
-                print(
-                    "Wolfe condition i not satisfied (step did not result in a sufficient decrease in the objective function).")
+                print("Wolfe condition i not satisfied (step did not result in a sufficient decrease in the objective function).")
                 break
             delta_x1 = x2-x1
             mag_dx = alpha
@@ -393,7 +391,7 @@ def get_N(N0, delta_x0, del_f0, del_f1):
     C = (np.matrix(delta_x0)*np.matrix(gamma0).T *
          np.matrix(N0)+NG*np.matrix(delta_x0).T)/denom
     N1 = N0+A*B-C
-    return N1
+    return np.asarray(N1)
 
 
 def line_search(x0, f0, s, del_f0, f, alpha, settings):
