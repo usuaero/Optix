@@ -25,6 +25,8 @@ references:
 Parkinson, Balling, Hedengren, "Optimization Methods for Engineering Design",
 Brigham Young University, 2013.
 
+THIS SOFTWARE COMES WITH ABSOLUTELY NO WARRANTY EXPRESSED OR IMPLIED
+
 ## API
 
 All functionality of Optix is wrapped within the minimize() function in

@@ -58,7 +58,8 @@ class Settings:
 
         # BFGS args
         self.n_search = kwargs.get("n_search",8)
-        self.alpha_d = kwargs.get("default_alpha",None)
+        self.alpha_init = kwargs.get("alpha_init",1.0/self.n_search)
+        self.alpha_reset = kwargs.get("alpha_reset",False)
         self.alpha_mult = kwargs.get("alpha_mult",self.n_search-1)
         self.search_type = kwargs.get("line_search","bracket")
         self.rsq_tol = kwargs.get("rsq_tol",0.8)

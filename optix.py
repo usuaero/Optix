@@ -157,14 +157,20 @@ def minimize(fun, x0, **kwargs):
             -Number of points to be considered in the search direction. Defaults to
             8.
 
-            alpha_d(float,optional)
-            - Step size to be used in line searches. Defaults to 1/n_search for the first
-            iteration and the optimum step size from the previous iteration for all
-            subsequent iterations.
+            alpha_init(float,optional)
+            - Step size to be used for the first iteration of the first line search. Defaults
+            to 1/n_search.
+
+            alpha_reset(bool,optional)
+            - If this is set to True, the value of alpha will be reset to the initial value
+            at the beginning of each line search. If set to False, the value of alpha will
+            be set to the optimum step size from the previous line search. Defaults to False.
 
             alpha_mult(float,optional)
             - Factor by which alpha is adjusted during each iteration of the line
             search. Defaults to n_search-1.
+            NOTE: Optix will occasionally adjust this value to keep the line search from
+            oscillating between two values of alpha.
 
             line_search(string,optional)
             - Specifies which type of line search should be conducted in the search
@@ -311,6 +317,7 @@ def _bfgs(f, x_start, settings):
     o_iter = -1
     mag_dx = 1
     x0 = np.asarray(np.copy(x_start))
+    alpha_guess = None
 
     # Outer loop. Sets the N matrix to [I].
     while iter < settings.max_iterations and mag_dx > settings.termination_tol:
@@ -328,7 +335,10 @@ def _bfgs(f, x_start, settings):
 
         # Determine search direction and perform line search
         s = -np.dot(N0, del_f0)
-        alpha_guess = 1/settings.n_search
+        if alpha_guess is None or settings.alpha_reset:
+            alpha_guess = settings.alpha_init
+        else:
+            alpha_guess = mag_dx
         mag_s = np.linalg.norm(s)
         s = s/mag_s
         x1, f1, alpha, wolfe_satis = _line_search(x0, f0, s, del_f0, f, alpha_guess, settings)
@@ -361,7 +371,11 @@ def _bfgs(f, x_start, settings):
             s = -np.dot(N1, del_f1)
             mag_s = np.linalg.norm(s)
             s = s/mag_s
-            x2, f2, alpha, wolfe_satis = _line_search(x1, f1, s, del_f1, f, mag_dx, settings)
+            if settings.alpha_reset:
+                alpha_guess = settings.alpha_init
+            else:
+                alpha_guess = mag_dx
+            x2, f2, alpha, wolfe_satis = _line_search(x1, f1, s, del_f1, f, alpha_guess, settings)
             if not wolfe_satis:  # Check first Wolfe condition. If not satisfied, reset BFGS update.
                 x0 = x2
                 print("Wolfe condition i not satisfied (step did not result in a sufficient decrease in the objective function).")
@@ -399,9 +413,6 @@ def _line_search(x0, f0, s, del_f0, f, alpha, settings):
     if settings.verbose:
         print('Line Search ----------------------------------------------------------------------------')
         print('Search Direction: {0}'.format(s))
-
-    if settings.alpha_d is not None:
-        alpha = settings.alpha_d
 
     prev_reduced = False
     prev_increased = False
