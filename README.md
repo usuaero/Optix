@@ -103,6 +103,8 @@ Unit tests are are run using the following command.
 
 'python3 test.py'
 
-##Support For bugs, please create an issue on the github repository.
+##Support 
+For bugs, please create an issue on the github repository.
 
-##License This project is licensed under the MIT license. See LICENSE file for more information.
+##License 
+This project is licensed under the MIT license. See LICENSE file for more information.
