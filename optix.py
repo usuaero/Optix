@@ -1177,7 +1177,7 @@ def _print_setup(n_vars, x_start, bounds, n_cstr, n_ineq_cstr, settings):
     print('\n---------- Settings ----------')
     print('            method: {0}'.format(settings.method))
     print('     obj func args: {0}'.format(settings.args))
-    print('     default alpha: {0}'.format(settings.alpha_d))
+    print('     initial alpha: {0}'.format(settings.alpha_init))
     print('    stopping delta: {0}'.format(settings.termination_tol))
     print('     max processes: {0}'.format(settings.max_processes))
     print(' dx (finite diffs): {0}'.format(settings.dx))
