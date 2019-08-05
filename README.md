@@ -13,8 +13,8 @@ NOTE FOR LEGACY OPTIX USERS:
 
 Since January of 2019, API of Optix has changed significantly to somewhat
 mirror that of scipy.optimize. We continue working to improve the API and
-functionality of Optix. This README will always contain update information
-for using Optix.
+functionality of Optix. This README will always contain up to date 
+information for using Optix.
 
 BOUNDS FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
 
@@ -108,10 +108,10 @@ Unit tests are are run using the following command.
 
 'python3 test.py'
 
-##Support 
+## Support 
 
 For bugs, please create an issue on the github repository.
 
-##License 
+## License 
 
 This project is licensed under the MIT license. See LICENSE file for more information.
