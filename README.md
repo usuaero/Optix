@@ -2,17 +2,21 @@
 AeroLab Optimization Software
 
 Created by:
+
 Dr Doug Hunsaker (professor, Utah State University; director, USU AeroLab)
+
 Josh Hodson (graduate student, Utah State University)
+
 Cory Goates (undergraduate student, Utah State University)
 
 NOTE FOR LEGACY OPTIX USERS:
+
 Since January of 2019, API of Optix has changed significantly to somewhat
 mirror that of scipy.optimize. We continue working to improve the API and
 functionality of Optix. This README will always contain update information
 for using Optix.
 
-AS OF 2/22/2019, BOUNDS FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
+BOUNDS FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
 
 Optix is a gradient-based optimization tool designed with aerodynamics
 in mind. Recognizing that aerodynamic functions are often computationally
@@ -99,12 +103,15 @@ you first download and install Git. If you are unsure, you can check by typing
 2. `git clone https://github.com/usuaero/Optix`
 
 ## Testing
+
 Unit tests are are run using the following command.
 
 'python3 test.py'
 
 ##Support 
+
 For bugs, please create an issue on the github repository.
 
 ##License 
+
 This project is licensed under the MIT license. See LICENSE file for more information.
