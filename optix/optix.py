@@ -3,7 +3,7 @@ import os
 import shutil
 import time
 import multiprocessing as mp
-import classes as c
+import optix.classes as c
 import csv
 import matplotlib.pyplot as plt
 import itertools
@@ -967,8 +967,8 @@ def _grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b, alpha, d_p
             msg.append(", {0:>20}".format("g"+str(i)))
         print("".join(msg))
 
-    if settings.alpha_d is not None:
-        alpha = settings.alpha_d
+    if settings.alpha_reset:
+        alpha = settings.alpha_init
 
     while alpha > settings.termination_tol:
         if settings.verbose:
