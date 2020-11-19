@@ -23,6 +23,7 @@ def grad(f,x,dx,central,pool):
             argslist.append(x+dx_v)
         argslist.append(x)
 
+    print("Gradient map!")
     results = pool.map(f,argslist)
 
     gradient = np.zeros((n,1))
@@ -178,7 +179,7 @@ class Objective:
         if self.gr == None:
             return grad(self.f,x,self.dx,self.central_diff,self.pool)
         else:
-            return self.gr(x)
+            return self.gr(x, *self.args)
 
     def __getstate__(self):
         self_dict = self.__dict__.copy()
