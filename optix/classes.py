@@ -23,7 +23,6 @@ def grad(f,x,dx,central,pool):
             argslist.append(x+dx_v)
         argslist.append(x)
 
-    print("Gradient map!")
     results = pool.map(f,argslist)
 
     gradient = np.zeros((n,1))
