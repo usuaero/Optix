@@ -1,38 +1,43 @@
-from collections import OrderedDict
+import multiprocessing_on_dill as mp
 import numpy as np
-import os
-import shutil
-import time
-import multiprocessing as mp
+
 
 def grad(f,x,dx,central,pool):
+    # Calculates the derivative of f using finite differences
+
+    # Number of design variables
     n = len(x)
 
+    # Assemble arguments list for finite differencing
     if central:
         argslist = []
         for i in range(n):
-            dx_v = np.zeros((n,1))
+            dx_v = np.zeros(n)
             dx_v[i] = dx
             argslist.append(x-dx_v)
             argslist.append(x+dx_v)
     else:
         argslist = []
         for i in range(n):
-            dx_v = np.zeros((n,1))
+            dx_v = np.zeros(n)
             dx_v[i] = dx
             argslist.append(x+dx_v)
         argslist.append(x)
 
+    # Evaluate on the pool of processors
     results = pool.map(f,argslist)
 
-    gradient = np.zeros((n,1))
+    # Calculate gradient
+    gradient = np.zeros(n)
     if central:
         for i in range(n):
             gradient[i] = (results[2*i+1]-results[2*i])/(2*dx)
     else:
         for i in range(n):
             gradient[i] = (results[i]-results[-1])/dx
+
     return gradient
+
 
 class Settings:
     """Contains settings used by optimizer"""
@@ -91,6 +96,7 @@ class Settings:
         if self.method == "bgfs" and (bounds != None or constraints != None):
             raise ValueError("Bounds or constraints may not be specified for the simple BGFS algorithm.")
 
+
 class OptimizerResult:
     """Return data from the 'minimize' function"""
 
@@ -102,6 +108,7 @@ class OptimizerResult:
         self.total_iter = iterations
         self.obj_calls = obj_calls
         self.cstr_calls = cstr_calls
+
 
 class Constraint:
     """Class defining a constraint"""
@@ -139,51 +146,78 @@ class Constraint:
     def __setstate__(self, state):
         self.__dict__.update(state)
 
+
 class Objective:
     """Class defining objective function"""
-    eval_calls = mp.Value('i',0)
+    eval_calls = mp.Value('i', 0)
 
-    def __init__(self,f,pool,queue,settings,**kwargs):
-        self.args = settings.args
+
+    def __init__(self, f, pool, queue, settings, **kwargs):
+
+        # Store objects
         self.fun = f
         self.gr = kwargs.get("grad")
-        self.hess = kwargs.get("hess")
+        self.pool = pool
+        self.queue = queue
+
+        # Store settings
+        self.args = settings.args
         self.central_diff = settings.central_diff
         self.max_processes = settings.max_processes
         self.dx = settings.dx
         self.num_avg = settings.num_avg
-        self.pool = pool
-        self.queue = queue
+        self.avg_inv = 1.0/settings.num_avg
+
+        # Initialize evaluation calls
         with self.eval_calls.get_lock():
             self.eval_calls.value = 0
 
-    def f(self,x):
+
+    def f(self, x):
+        """Evaluates the objective function at the supplied point."""
+
+        # Initialize
         n = len(x)
         f_val = 0.0
+
+        # Loop through averaging
         for i in range(self.num_avg):
             try:
-                f_val += np.asscalar(self.fun(x,*self.args))
+                f_val += self.fun(x, *self.args)
             except AttributeError:
-                f_val += self.fun(x,*self.args)
+                f_val += self.fun(x, *self.args)
             with self.eval_calls.get_lock():
                 self.eval_calls.value += 1
-        f_val = f_val/self.num_avg
+        
+        # Compute average
+        f_val = f_val*self.avg_inv
+
+        # Print out
         msg = "{0:>20}".format(f_val)
         for value in x:
-            msg += ", {0:>20}".format(np.asscalar(value))
+            msg += ", {0:>20}".format(value)
         self.queue.put(msg)
+
         return f_val
 
-    def del_f(self,x):
+
+    def del_f(self, x):
+        """Calculates the gradient of the objective function using either the supplied gradient function or finite differencing."""
+
+        # Finite differencing
         if self.gr == None:
             return grad(self.f,x,self.dx,self.central_diff,self.pool)
+        
+        # User-supplied gradient
         else:
             return self.gr(x, *self.args)
+
 
     def __getstate__(self):
         self_dict = self.__dict__.copy()
         del self_dict['pool']
         return self_dict
+
 
     def __setstate__(self, state):
         self.__dict__.update(state)
@@ -196,6 +230,7 @@ class quadratic(object):
     evaluating the function at specific points, and determining the
     characteristics of the function.
     """
+
     def __init__(self, x, y):
         """
         Construct a quadratic object from tabulated data.

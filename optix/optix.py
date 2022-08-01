@@ -1,15 +1,10 @@
-import numpy as np
-import os
-import shutil
-import time
-import multiprocessing as mp
-import optix.classes as c
-import csv
-import matplotlib.pyplot as plt
 import itertools
-from time import time
 import warnings
 import copy
+
+import numpy as np
+import multiprocessing_on_dill as mp
+import optix.classes as c
 
 np.set_printoptions(precision=14)
 np.seterr(all='warn')
@@ -56,20 +51,6 @@ def minimize(fun, x0, **kwargs):
             point. Definition is the same as fun() but must return array-like,
             shape(n,). If not specified, will be estimated using a finite-
             difference approximation.
-
-            hess(callable,optional)
-            - Returns the Hessian of of the objective function at a specified
-            point. Definition is the same as fun() but must return array-like,
-            shape(n,n). If not specified, will be estimated using a finite-
-            difference approximation.
-            NOTE: bgfs, sqp, and grg do not require direct Hessian evaluations,
-            so this functionality is not defined at this time.
-
-            bounds(sequence of tuple,optional)
-            - Bounds on independent variables. Can only be used with constrained
-            methods. Should be a sequence of (min,max) pairs for each element in
-            x. Use -numpy.inf or numpy.inf to specify no bound.
-            NOTE: NOT CURRENTLY IMPLEMENTED
 
             constraints(list of {Constraint,dict}, optional)
             - Constraints on the design space. Can only be used with constrained
@@ -233,7 +214,7 @@ def minimize(fun, x0, **kwargs):
 
     # Initialize design variables
     n_vars = len(x0)
-    x_start = np.reshape(x0, (n_vars, 1))
+    x_start = np.array(x0)
 
     # Initialize multiprocessing
     with mp.Pool(settings.max_processes) as pool:
@@ -250,14 +231,13 @@ def minimize(fun, x0, **kwargs):
             kwargs.get("constraints"), pool, queue, settings)
         settings.n_cstr = n_cstr
         settings.n_ineq_cstr = n_ineq_cstr
-        bounds = kwargs.get("bounds")
 
         # Check constraints
         if n_cstr-n_ineq_cstr > n_vars:
             raise ValueError("The problem is overconstrained.")
 
         # Print setup information to command line
-        _print_setup(n_vars, x_start, bounds, n_cstr, n_ineq_cstr, settings)
+        _print_setup(n_vars, x_start, n_cstr, n_ineq_cstr, settings)
 
         # Initialize formatting of output files
         _format_output_files(n_vars, n_cstr, settings, pool, queue)
@@ -298,35 +278,47 @@ def minimize(fun, x0, **kwargs):
 
 def _find_minimum(f, g, x_start, settings):
     """Calls specific optimization algorithm as needed"""
+
+    # BFGS
     if settings.method == "bfgs":
         return _bfgs(f, x_start, settings)
+
+    # SQP
     elif settings.method == "sqp":
         return _sqp(f, g, x_start, settings)
+
+    # GRG
     elif settings.method == "grg":
         return _grg(f, g, x_start, settings)
+
     else:
         raise ValueError("Method improperly specified.")
 
 
 def _bfgs(f, x_start, settings):
-    """Performs quasi-Newton, unconstrained optimization"""
+    """Performs quasi-Newton, unconstrained optimization using the BFGS Hessian update."""
 
     # Initialize
     iter = -1
     n = len(x_start)
     o_iter = -1
     mag_dx = 1
-    x0 = np.asarray(np.copy(x_start))
+    x0 = np.copy(x_start)
     alpha_guess = None
 
     # Outer loop. Sets the N matrix to [I].
     while iter < settings.max_iterations and mag_dx > settings.termination_tol:
+
+        # Print Hessian message
         if settings.verbose:
             print("Setting Hessian to the identity matrix.")
+
+        # Initialize iterations
         o_iter += 1
         i_iter = 0
         iter += 1
 
+        # Get starting point
         f0_eval = f.pool.apply_async(f.f, (x0,))
         del_f0 = f.del_f(x0)
         f0 = f0_eval.get()
@@ -334,7 +326,7 @@ def _bfgs(f, x_start, settings):
         N0 = np.eye(n)*settings.hess_init
 
         # Determine search direction and perform line search
-        s = -np.dot(N0, del_f0)
+        s = -np.matmul(N0, del_f0)
         if alpha_guess is None or settings.alpha_reset:
             alpha_guess = settings.alpha_init
         else:
@@ -364,11 +356,11 @@ def _bfgs(f, x_start, settings):
                 x0 = x1
                 break
 
-            # Update Hessian
+            # Update Hessian inverse
             N1 = _get_N(N0, delta_x0, del_f0, del_f1)
 
             # Determine new search direction and perform line search
-            s = -np.dot(N1, del_f1)
+            s = -np.matmul(N1, del_f1)
             mag_s = np.linalg.norm(s)
             s = s/mag_s
             if settings.alpha_reset:
@@ -395,16 +387,24 @@ def _bfgs(f, x_start, settings):
 
 
 def _get_N(N0, delta_x0, del_f0, del_f1):
-    """Perform BFGS update on N matrix"""
-    gamma0 = del_f1-del_f0
-    denom = np.matrix(delta_x0).T*np.matrix(gamma0)
-    NG = np.matrix(N0)*np.matrix(gamma0)
-    A = np.asscalar(1+np.matrix(gamma0).T*NG/denom)
-    B = (np.matrix(delta_x0)*np.matrix(delta_x0).T/denom)
-    C = (np.matrix(delta_x0)*np.matrix(gamma0).T *
-         np.matrix(N0)+NG*np.matrix(delta_x0).T)/denom
-    N1 = N0+A*B-C
-    return np.asarray(N1)
+    """Perform BFGS update on inverse Hessian matrix"""
+
+    # Initial calcs
+    y_k = del_f1 - del_f0
+    sigma_k = 1.0/np.inner(delta_x0, y_k)
+
+    ## Intermediate matrics
+    #NG = np.matmul(N0, y_k)
+    #A = 1.0 + np.matrix(y_k).T*NG*sigma_k
+    #B = np.outer(delta_x0, delta_x0)*sigma_k
+    #C = ( np.matmul(np.outer(delta_x0, y_k), N0) + np.matmul(NG, delta_x0) ) * sigma_k
+
+    ## Calculate new Hessian
+    #N1 = N0 + A*B - C
+    A = np.eye(len(delta_x0)) - sigma_k*np.outer(delta_x0, y_k)
+    B = sigma_k*np.outer(delta_x0, delta_x0)
+
+    return np.matmul(A, np.matmul(N0, A)) + B
 
 
 def _line_search(x0, f0, s, del_f0, f, alpha, settings):
@@ -855,7 +855,7 @@ def _grg(f, g, x_start, settings):
 
         # Conduct line search
         x1, f1, g1, err = _grg_line_search(s, z0, z_ind0, y0, y_ind0, f, f0, g, g0, cstr_b, mag_dx, d_psi_d_z0, d_psi_d_y0, n_vars, n_cstr, n_binding, settings)
-        if err is -1:
+        if err == -1:
             cstr_calls = []
             for i in range(n_cstr):
                 cstr_calls.append(g[i].eval_calls.value)
@@ -1129,6 +1129,8 @@ def _get_constraints(constraints, pool, queue, settings):
 
 
 def _append_file(iter, o_iter, i_iter, obj_fcn_value, mag_dx, design_point, gradient, settings, **kwargs):
+    # Writes a new iteration to the output files
+
     g = kwargs.get("g")
     del_g = kwargs.get("del_g")
 
@@ -1137,44 +1139,47 @@ def _append_file(iter, o_iter, i_iter, obj_fcn_value, mag_dx, design_point, grad
     values_msg = msg
     for value in design_point:
         values_msg = ('{0}, {1: 20.13E}'.format(
-            values_msg, np.asscalar(value)))
+            values_msg, value))
     if not g is None:
         for cstr in g:
-            values_msg = ('{0}, {1: 20.13E}'.format(
-                values_msg, np.asscalar(cstr)))
+            values_msg = ('{0}, {1:20.13E}'.format(
+                values_msg, cstr))
     print(values_msg)
     with open(settings.opt_file, 'a') as opt_file:
         print(values_msg, file=opt_file)
 
     grad_msg = msg
     for grad in gradient:
-        grad_msg = ('{0}, {1: 20.13E}'.format(grad_msg, np.asscalar(grad)))
+        grad_msg = ('{0}, {1:20.13E}'.format(grad_msg, grad))
     if not del_g is None:
         for i in range(settings.n_cstr):
             for j in range(len(design_point)):
-                grad_msg = ('{0}, {1: 20.13E}'.format(
-                    grad_msg, np.asscalar(del_g[j, i])))
+                grad_msg = ('{0}, {1:20.13E}'.format(grad_msg, del_g[j,i]))
     with open(settings.grad_file, 'a') as grad_file:
         print(grad_msg, file=grad_file)
 
 
-def _print_setup(n_vars, x_start, bounds, n_cstr, n_ineq_cstr, settings):
-    print("\nOptix.py from USU AeroLab")
+def _print_setup(n_vars, x_start, n_cstr, n_ineq_cstr, settings):
+    # Starts the terminal output
 
-    print('\n---------- Variables ----------')
+    print()
+    print("Optix.py from USU AeroLab")
+
+    print()
+    print('---------- Variables ----------')
     print("Optimizing in {0} variables.".format(n_vars))
     print("Initial guess:\n{0}".format(x_start))
-    if bounds != None:
-        print("Variable bounds:\n{0}".format(bounds))
 
-    print('\n---------- Constraints ----------')
+    print()
+    print('---------- Constraints ----------')
     print('{0} total constraints'.format(n_cstr))
     print('{0} inequality constraints'.format(n_ineq_cstr))
     print('{0} equality constraints'.format(n_cstr-n_ineq_cstr))
     print('***Please note, Optix will rearrange constraints so the inequality constraints are listed first.')
     print('***Otherwise, the order is maintained.')
 
-    print('\n---------- Settings ----------')
+    print()
+    print('---------- Settings ----------')
     print('            method: {0}'.format(settings.method))
     print('     obj func args: {0}'.format(settings.args))
     print('     initial alpha: {0}'.format(settings.alpha_init))
@@ -1188,7 +1193,7 @@ def _print_setup(n_vars, x_start, bounds, n_cstr, n_ineq_cstr, settings):
             print('using central difference approximation')
         else:
             print('using forward difference approximation')
-    print('')
+    print()
 
 
 def _eval_write(filename, header, q):
@@ -1208,18 +1213,24 @@ def _eval_write(filename, header, q):
 
 
 def _format_output_files(n_vars, n_cstr, settings, pool, queue):
-    opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}'.format(
-        'iter', 'outer', 'inner', 'fitness', 'mag(dx)')
+    # Sets up output files
+
+    # Set up header
+    opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}'.format('iter', 'outer', 'inner', 'fitness', 'mag(dx)')
     for i in range(n_vars):
         opt_header += ', {0:>20}'.format('x'+str(i))
     for i in range(n_cstr):
         opt_header += ', {0:>20}'.format('g'+str(i))
 
+    # Open file
     opt_filename = "optimize"+settings.file_tag+".txt"
     settings.opt_file = opt_filename
+
+    # Write header
     with open(opt_filename, 'w') as opt_file:
         opt_file.write(opt_header + '\n')
 
+    # Set up gradient header
     grad_header = '{0:>84}  {1:>20}'.format(' ', 'df')
     for i in range(n_cstr):
         grad_header += (', {0:>'+str(21*n_vars)+'}').format('dg'+str(i))
@@ -1229,8 +1240,11 @@ def _format_output_files(n_vars, n_cstr, settings, pool, queue):
         for i in range(n_vars):
             grad_header += ', {0:>20}'.format('dx'+str(i))
 
+    # Open gradient file
     grad_filename = "gradient"+settings.file_tag+".txt"
     settings.grad_file = grad_filename
+
+    # Write gradient header
     with open(grad_filename, 'w') as grad_file:
         grad_file.write(grad_header + '\n')
 
