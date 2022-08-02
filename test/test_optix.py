@@ -1,80 +1,64 @@
 from random import random
 
-import multiprocessing_on_dill as multiprocessing
 import optix as opt
+import numpy as np
 
 
-def test_BFGS_quad_8_1():
+def test_BFGS_quadratic_line_search_8_steps_1_processor_booth():
 
-    def f(x):
-        return x[0]**4-2*x[1]*x[0]**2+x[1]**2+x[0]**2-2*x[0]+5
-
-    x0 = [-10+20*random(),-10+20*random()]
+    x0 = [3.0, -3.0]
     
-    optimum = opt.minimize(f, x0, file_tag="_test", n_search=8, line_search="quadratic", termination_tol=1e-6, default_alpha=0.01)
+    optimum = opt.minimize(opt.test_functions.booth, x0, file_tag="_test", n_search=8, line_search="quadratic", termination_tol=1e-12)
 
     print("Optimum value: {0}".format(optimum.f))
     print("Optimum point: {0}".format(optimum.x))
     print("Function calls: {0}".format(optimum.obj_calls))
 
-    assert(optimum.f - 4.0 < 1e-7)
-    assert(abs(optimum.x[0] - 1.0) < 1e-3)
-    assert(abs(optimum.x[1] - 1.0) < 1e-3)
+    assert(abs(optimum.f) < 1e-12)
+    assert(abs(optimum.x[0] - 1.0) < 1e-8)
+    assert(abs(optimum.x[1] - 3.0) < 1e-8)
 
 
-def test_BFGS_3_var_brkt_8_8():
+def test_BFGS_bracket_line_search_8_steps_8_processors_booth():
 
-    def f(x):
-        return x[0]**4-2*x[1]*x[0]**2+x[1]**2+x[0]**2-2*x[0]+5
+    x0 = [4.0, -4.0]
     
-    x0 = [-10+20*random(),-10+20*random()]
-    
-    optimum = opt.minimize(f,x0,file_tag="_test",n_search=8,max_processes=8,line_search="bracket",termination_tol=1e-6,alpha_mult=1.5,default_alpha=0.1)
+    optimum = opt.minimize(opt.test_functions.booth, x0, file_tag="_test", n_search=8, max_processes=8, line_search="bracket", termination_tol=1e-12)
 
     print("Optimum value: {0}".format(optimum.f))
     print("Optimum point: {0}".format(optimum.x))
     print("Function calls: {0}".format(optimum.obj_calls))
 
-    assert(optimum.f - 4.0 < 1e-7)
-    assert(abs(optimum.x[0] - 1.0) < 1e-3)
-    assert(abs(optimum.x[1] - 1.0) < 1e-3)
+    assert(abs(optimum.f) < 1e-12)
+    assert(abs(optimum.x[0] - 1.0) < 1e-8)
+    assert(abs(optimum.x[1] - 3.0) < 1e-8)
 
 
-def test_BFGS_brkt_4_1():
-
-    def f(x):
-        return -x[0]*x[1]+0.5*(x[0]**2+x[1]**2)
-    
-    x0 = [-10+20*random(),-10+20*random()]
-    
-    optimum = opt.minimize(f,x0,file_tag="_test",n_search=4,line_search="bracket",termination_tol=1e-6,default_alpha=0.01)
-
-    print("Optimum value: {0}".format(optimum.f))
-    print("Optimum point: {0}".format(optimum.x))
-    print("Function calls: {0}".format(optimum.obj_calls))
-
-    assert(optimum.f - 4.0 < 1e-7)
-    assert(abs(optimum.x[0] - 1.0) < 1e-3)
-    assert(abs(optimum.x[1] - 1.0) < 1e-3)
-
-def test_BFGS_brkt_8_8_alpha_mult():
+def test_GRG_2_ineq_2_eq_cstr_1_processor():
 
     def f(x):
-        return x[0]**4-2*x[1]*x[0]**2+x[1]**2+x[0]**2-2*x[0]+5
+        return x[0]**2+x[1]+x[2]**2+np.exp(x[0]+x[2])
     
-    x0 = [-10+20*random(),-10+20*random()]
+    def g1(x):
+        return -(x[0]**2+x[1]**2)+100
     
-    optimum = opt.minimize(f,x0,file_tag="_test",n_search=8,max_processes=8,line_search="bracket",termination_tol=1e-6,alpha_mult=1.5,default_alpha=0.1)
-
+    def g2(x):
+        return -x[0]-x[2]+1
+    
+    def g3(x):
+        return x[1]+9
+    
+    def g4(x):
+        return x[2]-2
+    
+    constraints = [{"type":"eq","fun":g1},{"type":"ineq","fun":g2},{"type":"ineq","fun":g3},{"type":"eq","fun":g4}]
+    x0 = [1.0, 1.0, 1.0]
+    
+    optimum = opt.minimize(f,x0,constraints=constraints,method='grg',file_tag="_test",max_processes=1,termination_tol=1e-9,central_diff=False)
     print("Optimum value: {0}".format(optimum.f))
     print("Optimum point: {0}".format(optimum.x))
-    print("Function calls: {0}".format(optimum.obj_calls))
 
-    assert(optimum.f < 1e-7)
-    assert(abs(optimum.x[0] - -6.15231132878745) < 1e-3)
-    assert(abs(optimum.x[1] - -6.15231162316595) < 1e-3)
-
-
-if __name__=="__main__":
-
-    pass
+    assert(abs(optimum.f) < 1e-12)
+    assert(abs(optimum.x[0] - 1.0) < 1e-8)
+    assert(abs(optimum.x[1] - 3.0) < 1e-8)
+    assert(abs(optimum.x[2] - 3.0) < 1e-8)

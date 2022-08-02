@@ -15,106 +15,93 @@ def minimize(fun, x0, **kwargs):
     """Minimize a scalar function in one or more variables
 
         Parameters
-        ------
+        ----------
+        fun : callable
+            Objective to be minimized. Must be a scalar function of the form
+            ```
+                def fun(x,*args):
+                    return float
+            ```
+            where x is a vector of the design variables and *args is all other parameters necessary for calling the function.
 
-            fun(callable)
-            - Objective to be minimized. Must be a scalar function:
-            def fun(x,*args):
-                return float
-            where x is a vector of the design variables and *args is all
-            other parameters necessary for calling the function. Note that
-            Optix will pass x as a numpy column vector (i.e. shape(n_vars,1)).
-            This should be taken into consideration when writing fun().
+        x0 : array-like
+            A starting guess for the independent variables. May be a list or numpy array.
 
-            x0(array-like,shape(n,))
-            - A starting guess for the independent variables. May be
-            a list or numpy array. All variables must be represented as
-            minimize determines the number of variables from the length
-            of this vector.
+        args : tuple, optional
+            Arguments to be passed to the objective function.
 
-            args(tuple,optional)
-            - Arguments to be passed to the objective function.
+        method : str, optional
+            Method to be used by minimize to find the minimum of the objective function. May be one of the following:
 
-            method(str,optional)
-            - Method to be used by minimize to find the minimum of the
-            objective function. May be one of the following:
                 Unconstrained problem:
-                    "bgfs" - quasi-Nexton with BGFS Hessian update
+                    "bfgs" - quasi-Newton with bfgs Hessian update
+
                 Constrained problem:
                     "sqp" - sequential quadratic programming
                     "grg" - generalized reduced gradient
-            If no method is specified, minimize will choose either "bgfs"
-            or "sqp", based on whether constraints were given.
 
-            grad(callable,optional)
-            - Returns the gradient of the objective function at a specified
-            point. Definition is the same as fun() but must return array-like,
-            shape(n,). If not specified, will be estimated using a finite-
-            difference approximation.
+            If no method is specified, either "bfgs" or "sqp" will be chosen, based on whether constraints were given.
 
-            constraints(list of {Constraint,dict}, optional)
-            - Constraints on the design space. Can only be used with constrained
+        grad : callable, optional
+            Returns the gradient of the objective function at a specified point. Definition is the same as fun() but must return array-like,
+            shape(n). If not specified, will be estimated using a finite-difference approximation.
+
+        constraints : list of dict, optional
+            Constraints on the design space. Can only be used with constrained
             methods. Given as a list of dictionaries, each having the following
+
             keys:
                 type (str)
                     Constraint type; either 'eq' for equality or 'ineq' for
                     inequality; equality means the constraint function must
                     equate to 0 and inequality means the constraint function
                     must be positive.
+
                 fun (callable)
                     Value of the constraint function. Must return a scalar. May 
                     only have one argument, being an array of the design variables.
-                grad (callable,optional)
+
+                grad (callable, optional
                     Returns the gradient of the constraint function at a
                     specified point. Must return array-like, shape(n,). May
                     only have one argument, being an array of the design variables.
 
-            termination_tol(float,optional)
-            - Point at which the optimization will quit. Execution terminates
-            if the change in x for any step becomes less than the termination
-            tolerance. Defaults to 1e-12.
+        termination_tol : float, optional
+            Execution terminates if the change in x for any step becomes less than the termination tolerance. Defaults to 1e-12.
 
-            grad_tol(float,optional)
-            - Point at which the optimization will quit. Execution terminates
-            if the norm of the gradient at any step becomes less than this
-            tolerance. Defaults to 1e-12.
+        grad_tol : float, optional
+            Execution terminates if the norm of the gradient at any step becomes less than this tolerance. Defaults to 1e-12.
 
-            verbose(bool,optional)
-            - If set to true, extra information about each step of the
-            optimization will be printed to the command line.
+        verbose : bool, optional
+            If set to true, extra information about each step of the optimization will be printed to the command line. Defaults to False.
 
-            cent_diff(bool,optional)
-            - Flag for setting finite-difference approximation method. If set
-            to false, a forward-difference approximation will be used. Otherwise,
+        cent_diff : bool, optional
+            Flag for setting finite-difference approximation method. If set to false, a forward-difference approximation will be used. Otherwise,
             defaults to a central-difference.
 
-            file_tag(str,optional)
-            - Tag to be appended to the output filenames. If not specified,
-            output files will be overwritten each time minimize() is called.
-            Output files may still be overwritten if file_tag does not change
-            with each call.
+        file_tag : str, optional
+            Tag to be appended to the output filenames. If not specified, output files will be overwritten each time minimize() is called.
+            Output files may still be overwritten if file_tag does not change with each call.
 
-            max_processes(int,optional)
-            - Maximum number of processes to be used in multiprocessing. Defaults
-            fo 1.
+        max_processes : int, optional
+            Maximum number of processes to be used in multiprocessing. Defaults fo 1.
 
-            dx(float,optional)
-            - Step size to be used in finite difference methods. Defaults to 0.001
+        dx : float, optional
+            Step size to be used in finite difference methods. Defaults to 0.001
 
-            max_iterations(int,optional)
-            - Maximum number of iterations for the optimization algorithm. Defaults to
-            inf.
+        max_iterations : int, optional
+            Maximum number of iterations for the optimization algorithm. Defaults to inf.
 
-            num_avg(int,optional)
-            - Number of times to run the objective function at each point. The objective
-            value returned will be the average of all calls. This can be useful when
+        num_avg : int, optional
+            Number of times to run the objective function at each point. The objective value returned will be the average of all calls. This can be useful when
             dealing with noisy models. Defaults to 1.
 
         Returns
         ------
 
-            Optimum(OptimizerResult)
-            - Object containing information about the result of the optimization.
+        Optimum : OptimizerResult
+            Object containing information about the result of the optimization.
+
             Attributes include:
                 x(array-like,shape(n,))
                     Point in the design space where the optimization ended.
@@ -134,79 +121,64 @@ def minimize(fun, x0, **kwargs):
 
         BFGS
 
-            n_search(int,optional)
-            -Number of points to be considered in the search direction. Defaults to
-            8.
+        n_search : int, optional
+            Number of points to be considered in the search direction. Defaults to 8.
 
-            alpha_init(float,optional)
-            - Step size to be used for the first iteration of the first line search. Defaults
-            to 1/n_search.
+        alpha_init : float, optional
+            Step size to be used for the first iteration of the first line search. Defaults to 1/n_search.
 
-            alpha_reset(bool,optional)
-            - If this is set to True, the value of alpha will be reset to the initial value
-            at the beginning of each line search. If set to False, the value of alpha will
+        alpha_reset : bool, optional
+            If this is set to True, the value of alpha will be reset to the initial value at the beginning of each line search. If set to False, the value of alpha will
             be set to the optimum step size from the previous line search. Defaults to False.
 
-            alpha_mult(float,optional)
-            - Factor by which alpha is adjusted during each iteration of the line
-            search. Defaults to n_search-1.
-            NOTE: Optix will occasionally adjust this value to keep the line search from
-            oscillating between two values of alpha.
+        alpha_mult : float, optional
+            Factor by which alpha is adjusted during each iteration of the line search. Defaults to n_search-1.
+            NOTE: Optix will occasionally adjust this value to keep the line search from oscillating between two values of alpha.
 
-            line_search(string,optional)
-            - Specifies which type of line search should be conducted in the search
-            direction. The following types are possible:
+        line_search : str, optional
+            Specifies which type of line search should be conducted in the search direction. The following types are possible:
                 "bracket" - backets minimum and finds vertex of parabola formed by
                 3 minimum points
                 "quadratic" - fits a quadratic to the search points and finds vertex
             Defaults to bracket.
 
-            rsq_tol(float,optional):
-            - Specifies the necessary quality of the quadratic fit to the line search
-            (only used if line_search is "quadratic"). The quadratic fit will only be
+        rsq_tol : float, optional:
+            Specifies the necessary quality of the quadratic fit to the line search (only used if line_search is "quadratic"). The quadratic fit will only be
             accepted if the R^2 value of the fit is above rsq_tol. Defaults to 0.8.
 
-            wolfe_armijo(float,optional)
-            - Value of c1 in the Wolfe conditions. Defaults to 1e-4.
+        wolfe_armijo : float, optional
+            Value of c1 in the Wolfe conditions. Defaults to 1e-4.
 
-            wolfe_curv(float,optional)
-            - Value of c2 in the Wolfe conditions. Defaults to 0.9.
+        wolfe_curv : float, optional
+            Value of c2 in the Wolfe conditions. Defaults to 0.9.
 
-            hess_init(float,optional)
-            - Sets the value of the Hessian to hess_init*[I] for the first iteration of
-            the BFGS update. Increasing this value may help speed convergence of some
+        hess_init : float, optional
+            Sets the value of the Hessian to hess_init*[I] for the first iteration of the BFGS update. Increasing this value may help speed convergence of some
             problems. Defaults to 1.
 
         SQP
 
-            strict_penalty(bool,optional)
-            - Specifies whether a given step in the optimization must result in a decrease in
-            the penatly function. Setting this to false may help convergence of some problems
+        strict_penalty : bool, optional
+            Specifies whether a given step in the optimization must result in a decrease in the penatly function. Setting this to false may help convergence of some problems
             and speed computation. Defaults to true.
 
-            hess_init(float,optional)
-            - Sets the value of the Hessian to hess_init*[I] for the first iteration of
-            the BFGS update. Increasing this value may help speed convergence of some
-            problems, but this is not recommended in most cases. Behavior is not stable if
-            this value is less than 1. Defaults to 1.
+        hess_init : float, optional
+            Sets the value of the Hessian to hess_init*[I] for the first iteration of the BFGS update. Increasing this value may help speed convergence of some
+            problems, but this is not recommended in most cases. Behavior is not stable if this value is less than 1. Defaults to 1.
 
         GRG
 
-            n_search(int,optional)
-            -Number of points to be considered in the search direction. Defaults to
-            8.
+        n_search : int, optional
+            Number of points to be considered in the search direction. Defaults to 8.
 
-            alpha_d(float,optional)
-            - Step size to be used in line searches. If not specified, the step size
-            is the optimum step size from the previous iteration.
+        alpha_d : float, optional
+            Step size to be used in line searches. If not specified, the step size is the optimum step size from the previous iteration.
 
-            alpha_mult(float,optional)
-            - Factor by which alpha is adjusted during each iteration of the line
-            search. Defaults to n_search - 1
+        alpha_mult : float, optional
+            Factor by which alpha is adjusted during each iteration of the line search. Defaults to n_search - 1
 
-            cstr_tol(float,optional)
-            - A constraint is considered to be binding if it evaluates to less than this
-            number. Defaults to 1e-4.
+        cstr_tol : float, optional
+            A constraint is considered to be binding if it evaluates to less than this number. Defaults to 1e-4.
     """
 
     # Initialize settings
@@ -227,6 +199,10 @@ def minimize(fun, x0, **kwargs):
         f = c.Objective(fun, pool, queue, settings, grad=grad, hess=hess)
 
         # Initialize constraints
+        constraints = kwargs.get('constraints', None)
+        if constraints == None:
+            settings.method = "bfgs"
+
         g, n_cstr, n_ineq_cstr = _get_constraints(
             kwargs.get("constraints"), pool, queue, settings)
         settings.n_cstr = n_cstr
@@ -432,7 +408,7 @@ def _line_search(x0, f0, s, del_f0, f, alpha, settings):
             for i in range(settings.n_search + 1):
                 out = '{0:5d}, {1:15.7E}'.format(i, f_search[i])
                 for j in range(len(x0)):
-                    out += ', {0:15.7E}'.format(np.asscalar(x_search[i][j]))
+                    out += ', {0:15.7E}'.format(x_search[i][j])
                 print(out)
 
         # Check for invalid results
@@ -689,26 +665,26 @@ def _get_delta_x(x0, f0, f, g, P0, n_vars, n_cstr, n_ineq_cstr, del_2_L0, del_f0
                 print("Optimal combination found.")
             break
     else:
+
         # If an optimal combination is not found, relax the conditions by allowing non-binding constraints to be violated.
         if settings.verbose:
-            print(
-                "Optimal combination not found. Allowing non-binding constraints to be violated.")
+            print("Optimal combination not found. Allowing non-binding constraints to be violated.")
+
         for cstr_b in poss_combos:
 
             # At most, n constraints may be binding in n-dimensional space.
             if sum(cstr_b) > n_vars:
                 continue
 
+            # Check linear independence of constraint gradients.
             if sum(cstr_b) > 1:
-                # Check linear independence of constraint gradients.
                 _, s, _ = np.linalg.svd(del_g0[:, cstr_b].T)
                 if (abs(s) < 1e-14).any():
                     continue
 
-            delta_x, l = _get_x_lambda(
-                n_vars, n_cstr, del_2_L0, del_g0, del_f0, g0, cstr_b)
+            delta_x, l = _get_x_lambda(n_vars, n_cstr, del_2_L0, del_g0, del_f0, g0, cstr_b)
 
-            x1 = x0+delta_x
+            x1 = x0 + delta_x
             g1 = _eval_constr(g, x1)
 
             # Check if constraints assumed to be binding are actually non-binding.
@@ -758,12 +734,12 @@ def _get_x_lambda(n_vars, n_cstr, del_2_L0, del_g0, del_f0, g0, cstr_b):
 
     # Create linear system to solve for delta_x and lambda
     A = np.zeros((n_vars+n_bind, n_vars+n_bind))
-    b = np.zeros((n_vars+n_bind, 1))
+    b = np.zeros(n_vars+n_bind)
     A[:n_vars, :n_vars] = del_2_L0
     A[:n_vars, n_vars:] = -del_g0[:, cstr_b]
     A[n_vars:, :n_vars] = del_g0[:, cstr_b].T
     b[:n_vars] = -del_f0
-    b[n_vars:] = np.reshape(-g0[cstr_b], (n_bind, 1))
+    b[n_vars:] = -g0[cstr_b]
 
     # Solve system and parse solution
     x_lambda = np.linalg.solve(A, b)
@@ -827,7 +803,7 @@ def _grg(f, g, x_start, settings):
         # Add slack variables
         s0 = g0[cstr_b].reshape((n_binding, 1))
         # We place the slack variables first since we would prefer those be the independent variables
-        variables0 = np.concatenate((s0, x0), axis=0)
+        variables0 = np.concatenate((s0, x0.reshape((n_vars, 1))), axis=0)
 
         # Partition variables
         z0, del_f_z0, d_psi_d_z0, z_ind0, y0, del_f_y0, d_psi_d_y0, y_ind0 = _partition_vars(
