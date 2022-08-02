@@ -4,7 +4,9 @@ import copy
 
 import numpy as np
 import multiprocessing_on_dill as mp
-import optix.classes as c
+
+from optix.classes import Settings, OptimizerResult, Constraint, Objective, Quadratic
+from optix.helpers import append_file, print_setup, get_constraints, eval_write, format_output_files
 
 np.set_printoptions(precision=14)
 np.seterr(all='warn')
@@ -133,18 +135,19 @@ def minimize(fun, x0, **kwargs):
 
         alpha_mult : float, optional
             Factor by which alpha is adjusted during each iteration of the line search. Defaults to n_search-1.
-            NOTE: Optix will occasionally adjust this value to keep the line search from oscillating between two values of alpha.
+            Optix will occasionally adjust this value to keep the line search from oscillating between two values of alpha.
 
         line_search : str, optional
             Specifies which type of line search should be conducted in the search direction. The following types are possible:
-                "bracket" - backets minimum and finds vertex of parabola formed by
-                3 minimum points
-                "quadratic" - fits a quadratic to the search points and finds vertex
+
+                "bracket" - backets minimum and finds the vertex of the parabola formed by 3 minimum points
+                "quadratic" - fits a quadratic to the search points and finds the vertex
+
             Defaults to bracket.
 
         rsq_tol : float, optional:
             Specifies the necessary quality of the quadratic fit to the line search (only used if line_search is "quadratic"). The quadratic fit will only be
-            accepted if the R^2 value of the fit is above rsq_tol. Defaults to 0.8.
+            accepted if the R^2 value of the fit is above rsq_tol. Otherwise, the method will fall back to bracketing. Defaults to 0.8.
 
         wolfe_armijo : float, optional
             Value of c1 in the Wolfe conditions. Defaults to 1e-4.
@@ -182,7 +185,7 @@ def minimize(fun, x0, **kwargs):
     """
 
     # Initialize settings
-    settings = c.Settings(**kwargs)
+    settings = Settings(**kwargs)
 
     # Initialize design variables
     n_vars = len(x0)
@@ -196,27 +199,27 @@ def minimize(fun, x0, **kwargs):
         # Initialize objective function
         grad = kwargs.get("grad")
         hess = kwargs.get("hess")
-        f = c.Objective(fun, pool, queue, settings, grad=grad, hess=hess)
+        f = Objective(fun, pool, queue, settings, grad=grad, hess=hess)
 
         # Initialize constraints
         constraints = kwargs.get('constraints', None)
         if constraints == None:
             settings.method = "bfgs"
 
-        g, n_cstr, n_ineq_cstr = _get_constraints(
+        g, n_cstr, n_ineq_cstr = get_constraints(
             kwargs.get("constraints"), pool, queue, settings)
         settings.n_cstr = n_cstr
         settings.n_ineq_cstr = n_ineq_cstr
 
         # Check constraints
         if n_cstr-n_ineq_cstr > n_vars:
-            raise ValueError("The problem is overconstrained.")
+            raise IOError("There are too many equality constraints; the problem is overconstrained.")
 
         # Print setup information to command line
-        _print_setup(n_vars, x_start, n_cstr, n_ineq_cstr, settings)
+        print_setup(n_vars, x_start, n_cstr, n_ineq_cstr, settings)
 
         # Initialize formatting of output files
-        _format_output_files(n_vars, n_cstr, settings, pool, queue)
+        format_output_files(n_vars, n_cstr, settings, pool, queue)
 
         # Kick off evaluation storage process (for more than one process)
         if settings.max_processes > 1:
@@ -225,8 +228,7 @@ def minimize(fun, x0, **kwargs):
                 eval_header += ', {0:>20}'.format('x'+str(i))
             eval_filename = "evaluations"+settings.file_tag+".txt"
 
-            writer = pool.apply_async(
-                _eval_write, (eval_filename, eval_header, queue))
+            writer = pool.apply_async(eval_write, (eval_filename, eval_header, queue))
 
         # Drive to the minimum
         opt = _find_minimum(f, g, x_start, settings)
@@ -238,8 +240,7 @@ def minimize(fun, x0, **kwargs):
                 eval_header += ', {0:>20}'.format('x'+str(i))
             eval_filename = "evaluations"+settings.file_tag+".txt"
 
-            writer = pool.apply_async(
-                _eval_write, (eval_filename, eval_header, queue))
+            writer = pool.apply_async(eval_write, (eval_filename, eval_header, queue))
 
         # Kill evaluation printer process
         queue.put('kill')
@@ -298,7 +299,7 @@ def _bfgs(f, x_start, settings):
         f0_eval = f.pool.apply_async(f.f, (x0,))
         del_f0 = f.del_f(x0)
         f0 = f0_eval.get()
-        _append_file(iter, o_iter, i_iter, f0, 0.0, x0, del_f0, settings)
+        append_file(iter, o_iter, i_iter, f0, 0.0, x0, del_f0, settings)
         N0 = np.eye(n)*settings.hess_init
 
         # Determine search direction and perform line search
@@ -320,11 +321,11 @@ def _bfgs(f, x_start, settings):
 
             # Update gradient and output file
             del_f1 = f.del_f(x1)
-            _append_file(iter, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings)
+            append_file(iter, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings)
 
             # Check for gradient termination
             if np.linalg.norm(del_f1) < settings.grad_tol:
-                return c.OptimizerResult(f1, x1, True, "Gradient tolerance reached.", iter, f.eval_calls.value)
+                return OptimizerResult(f1, x1, True, "Gradient tolerance reached.", iter, f.eval_calls.value)
 
             # Check second Wolfe condition. If not satisfied, reset BFGS update.
             if np.inner(delta_x0.T, del_f1.T) < settings.wolfe_curv*np.inner(delta_x0.T, del_f0.T):
@@ -359,7 +360,7 @@ def _bfgs(f, x_start, settings):
             x1 = x2
             f1 = f2
 
-    return c.OptimizerResult(f2, x2, True, "Step tolerance reached.", iter, f.eval_calls.value)
+    return OptimizerResult(f2, x2, True, "Step tolerance reached.", iter, f.eval_calls.value)
 
 
 def _get_N(N0, delta_x0, del_f0, del_f1):
@@ -479,7 +480,7 @@ def _find_opt_alpha(a, f_search, min_ind, settings):
     if settings.search_type == 'quadratic':
 
         # Fit quadratic
-        q = c.quadratic(np.asarray(a), np.asarray(f_search))
+        q = Quadratic(np.asarray(a), np.asarray(f_search))
         (alpha_opt, f_opt) = q.vertex()
 
         # If the quadratic fit is good, return its vertex
@@ -528,7 +529,7 @@ def _sqp(f, g, x_start, settings):
         del_f0, del_g0 = _eval_grad(x0, f, g, n_vars, n_cstr)
         del_2_L0 = np.eye(n_vars)*settings.hess_init
         f0 = f0_eval.get()
-        _append_file(iter, o_iter, i_iter, f0, 0.0, x0, del_f0, settings, g=g0, del_g=del_g0)
+        append_file(iter, o_iter, i_iter, f0, 0.0, x0, del_f0, settings, g=g0, del_g=del_g0)
 
         # Estimate initial penalty function. We allow this to be artificially high.
         P0 = np.copy(f0)
@@ -561,7 +562,7 @@ def _sqp(f, g, x_start, settings):
             # Update the Lagrangian Hessain
             del_2_L1 = _get_del_2_L(del_2_L0, del_f0, del_f1, l, del_g0, del_g1, n_vars, n_cstr, delta_x)
 
-            _append_file(iter, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings, g=g1, del_g=del_g1)
+            append_file(iter, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings, g=g1, del_g=del_g1)
 
             # Get step
             delta_x, l, x2, f2, g2, P2 = _get_delta_x(x1, f1, f, g, P1, n_vars, n_cstr, n_ineq_cstr, del_2_L1, del_f1, del_g1, g1, settings)
@@ -597,12 +598,12 @@ def _sqp(f, g, x_start, settings):
     del_g1 = np.zeros((n_vars, n_cstr))
     for i in range(n_cstr):
         del_g1[:, i] = g[i].del_g(x1).flatten()
-    _append_file(iter, o_iter, i_iter, f1, mag_dx, x1,
+    append_file(iter, o_iter, i_iter, f1, mag_dx, x1,
                 del_f1, settings, g=g1, del_g=del_g1)
     cstr_calls = []
     for i in range(n_cstr):
         cstr_calls.append(g[i].eval_calls.value)
-    return c.OptimizerResult(f1, x1, True, "Step termination tolerance reached.", iter, f.eval_calls.value, cstr_calls)
+    return OptimizerResult(f1, x1, True, "Step termination tolerance reached.", iter, f.eval_calls.value, cstr_calls)
 
 
 def _eval_grad(x0, f, g, n_vars, n_cstr):
@@ -770,7 +771,7 @@ def _grg(f, g, x_start, settings):
         # Evaluate current point
         del_f0, del_g0 = _eval_grad(x0, f, g, n_vars, n_cstr)
 
-        _append_file(iter, iter, iter, f0, mag_dx, x0,
+        append_file(iter, iter, iter, f0, mag_dx, x0,
                     del_f0, settings, g=g0, del_g=del_g0)
 
         # Determine binding constraints
@@ -822,7 +823,7 @@ def _grg(f, g, x_start, settings):
             for i in range(n_cstr):
                 cstr_calls.append(g[i].eval_calls.value)
             return_message = "Gradient termination tolerance reached (magnitude = {0}).".format(np.linalg.norm(del_f_r0))
-            return c.OptimizerResult(f0, x0, True, return_message, iter, f.eval_calls.value, cstr_calls)
+            return OptimizerResult(f0, x0, True, return_message, iter, f.eval_calls.value, cstr_calls)
 
         # The search direction is opposite the direction of the reduced gradient
         s = -1*del_f_r0/np.linalg.norm(del_f_r0)
@@ -836,7 +837,7 @@ def _grg(f, g, x_start, settings):
             for i in range(n_cstr):
                 cstr_calls.append(g[i].eval_calls.value)
             return_message = "Failed to converge to one or more constraint boundaries."
-            return c.OptimizerResult(f1, x1, False, return_message, iter, f.eval_calls.value, cstr_calls)
+            return OptimizerResult(f1, x1, False, return_message, iter, f.eval_calls.value, cstr_calls)
 
         delta_x = x1-x0
         mag_dx = np.linalg.norm(delta_x)
@@ -845,12 +846,12 @@ def _grg(f, g, x_start, settings):
         g0 = g1
 
     del_f0, del_g0 = _eval_grad(x0, f, g, n_vars, n_cstr)
-    _append_file(iter+1, iter+1, iter+1, f0, mag_dx, x0, del_f0, settings, g=g0, del_g=del_g0)
+    append_file(iter+1, iter+1, iter+1, f0, mag_dx, x0, del_f0, settings, g=g0, del_g=del_g0)
     cstr_calls = []
     for i in range(n_cstr):
         cstr_calls.append(g[i].eval_calls.value)
     return_message = "Step termination tolerance reached (magnitude = {0}).".format(mag_dx)
-    return c.OptimizerResult(f1, x1, True, return_message, iter, f.eval_calls.value, cstr_calls)
+    return OptimizerResult(f1, x1, True, return_message, iter, f.eval_calls.value, cstr_calls)
 
 
 def _eval_constr(g, x1):
@@ -1075,154 +1076,3 @@ def _eval_search_point(f, g, z0, y0, alpha, s, d_psi_d_y0, d_psi_d_z0, z_ind0, y
             return np.asarray(x_search).flatten(), f_search, np.asarray(g_search).flatten()
         except Warning:
             return None
-
-
-def _get_constraints(constraints, pool, queue, settings):
-    if constraints != None:
-        n_cstr = len(constraints)
-        n_ineq_cstr = 0
-        g = []
-        # Inequality constraints are stored first
-        for constraint in constraints:
-            if constraint["type"] == "ineq":
-                n_ineq_cstr += 1
-                grad = constraint.get("grad")
-                constr = c.Constraint(
-                    constraint["type"], constraint["fun"], pool, queue, settings, grad=grad)
-                g.append(constr)
-        for constraint in constraints:
-            if constraint["type"] == "eq":
-                grad = constraint.get("grad")
-                constr = c.Constraint(
-                    constraint["type"], constraint["fun"], pool, queue, settings, grad=grad)
-                g.append(constr)
-        g = np.array(g)
-    else:
-        g = None
-        n_cstr = 0
-        n_ineq_cstr = 0
-    return g, n_cstr, n_ineq_cstr
-
-
-def _append_file(iter, o_iter, i_iter, obj_fcn_value, mag_dx, design_point, gradient, settings, **kwargs):
-    # Writes a new iteration to the output files
-
-    g = kwargs.get("g")
-    del_g = kwargs.get("del_g")
-
-    msg = '{0:4d}, {1:5d}, {2:5d}, {3: 20.13E}, {4: 20.13E}'.format(
-        iter, o_iter, i_iter, obj_fcn_value, mag_dx)
-    values_msg = msg
-    for value in design_point:
-        values_msg = ('{0}, {1: 20.13E}'.format(
-            values_msg, value))
-    if not g is None:
-        for cstr in g:
-            values_msg = ('{0}, {1:20.13E}'.format(
-                values_msg, cstr))
-    print(values_msg)
-    with open(settings.opt_file, 'a') as opt_file:
-        print(values_msg, file=opt_file)
-
-    grad_msg = msg
-    for grad in gradient:
-        grad_msg = ('{0}, {1:20.13E}'.format(grad_msg, grad))
-    if not del_g is None:
-        for i in range(settings.n_cstr):
-            for j in range(len(design_point)):
-                grad_msg = ('{0}, {1:20.13E}'.format(grad_msg, del_g[j,i]))
-    with open(settings.grad_file, 'a') as grad_file:
-        print(grad_msg, file=grad_file)
-
-
-def _print_setup(n_vars, x_start, n_cstr, n_ineq_cstr, settings):
-    # Starts the terminal output
-
-    print()
-    print("Optix.py from USU AeroLab")
-
-    print()
-    print('---------- Variables ----------')
-    print("Optimizing in {0} variables.".format(n_vars))
-    print("Initial guess:\n{0}".format(x_start))
-
-    print()
-    print('---------- Constraints ----------')
-    print('{0} total constraints'.format(n_cstr))
-    print('{0} inequality constraints'.format(n_ineq_cstr))
-    print('{0} equality constraints'.format(n_cstr-n_ineq_cstr))
-    print('***Please note, Optix will rearrange constraints so the inequality constraints are listed first.')
-    print('***Otherwise, the order is maintained.')
-
-    print()
-    print('---------- Settings ----------')
-    print('            method: {0}'.format(settings.method))
-    print('     obj func args: {0}'.format(settings.args))
-    print('     initial alpha: {0}'.format(settings.alpha_init))
-    print('    stopping delta: {0}'.format(settings.termination_tol))
-    print('     max processes: {0}'.format(settings.max_processes))
-    print(' dx (finite diffs): {0}'.format(settings.dx))
-    print('          file tag: {0}'.format(settings.file_tag))
-    print('           verbose: {0}'.format(settings.verbose))
-    if settings.use_finite_diff:
-        if settings.central_diff:
-            print('using central difference approximation')
-        else:
-            print('using forward difference approximation')
-    print()
-
-
-def _eval_write(filename, header, q):
-    with open(filename, 'w') as f:
-        f.write(header+"\n")
-        f.flush()
-        while True:
-            try:
-                msg = q.get()
-            except:
-                continue
-            if msg == 'kill':
-                break
-            f.write(msg+"\n")
-            f.flush()
-    return True
-
-
-def _format_output_files(n_vars, n_cstr, settings, pool, queue):
-    # Sets up output files
-
-    # Set up header
-    opt_header = '{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}'.format('iter', 'outer', 'inner', 'fitness', 'mag(dx)')
-    for i in range(n_vars):
-        opt_header += ', {0:>20}'.format('x'+str(i))
-    for i in range(n_cstr):
-        opt_header += ', {0:>20}'.format('g'+str(i))
-
-    # Open file
-    opt_filename = "optimize"+settings.file_tag+".txt"
-    settings.opt_file = opt_filename
-
-    # Write header
-    with open(opt_filename, 'w') as opt_file:
-        opt_file.write(opt_header + '\n')
-
-    # Set up gradient header
-    grad_header = '{0:>84}  {1:>20}'.format(' ', 'df')
-    for i in range(n_cstr):
-        grad_header += (', {0:>'+str(21*n_vars)+'}').format('dg'+str(i))
-    grad_header += '\n{0:>4}, {1:>5}, {2:>5}, {3:>20}, {4:>20}'.format(
-        'iter', 'outer', 'inner', 'fitness', 'mag(dx)')
-    for j in range(n_cstr+1):
-        for i in range(n_vars):
-            grad_header += ', {0:>20}'.format('dx'+str(i))
-
-    # Open gradient file
-    grad_filename = "gradient"+settings.file_tag+".txt"
-    settings.grad_file = grad_filename
-
-    # Write gradient header
-    with open(grad_filename, 'w') as grad_file:
-        grad_file.write(grad_header + '\n')
-
-    # Print header to command line
-    print(opt_header)

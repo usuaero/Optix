@@ -223,7 +223,7 @@ class Objective:
         self.__dict__.update(state)
 
 
-class quadratic(object):
+class Quadratic(object):
     """Class for fitting, evaluating, and interrogating quadratic functions
 
     This class is used for fitting a quadratic function to a data set
@@ -286,5 +286,7 @@ class quadratic(object):
         """
         Evaluate the quadratic function at x
         """
-        if x is not None: return self.a * x**2 + self.b * x + self.c
-        else: return None
+        if x is not None:
+            return self.a * x**2 + self.b * x + self.c
+        else:
+            return None
