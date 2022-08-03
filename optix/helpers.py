@@ -125,7 +125,7 @@ def format_output_files(n_vars, n_cstr, settings, pool, queue):
         opt_header += ', {0:>20}'.format('g'+str(i))
 
     # Open file
-    opt_filename = "optimize"+settings.file_tag+".txt"
+    opt_filename = "iterations"+settings.file_tag+".txt"
     settings.opt_file = opt_filename
 
     # Write header
