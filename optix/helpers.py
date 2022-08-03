@@ -152,3 +152,20 @@ def format_output_files(n_vars, n_cstr, settings, pool, queue):
 
     # Print header to command line
     print(opt_header)
+
+
+def eval_grad(x0, f, g, n_vars, n_cstr):
+    # Evaluate gradients at specified point
+    del_f0 = f.del_f(x0)
+    del_g0 = np.zeros((n_vars, n_cstr))
+    for i in range(n_cstr):
+        del_g0[:,i] = g[i].del_g(x0)
+    return del_f0, del_g0
+
+
+def eval_constr(g, x1):
+    n_cstr = len(g)
+    g1 = np.zeros(n_cstr)
+    for i in range(n_cstr):
+        g1[i] = g[i].g(x1)
+    return g1
