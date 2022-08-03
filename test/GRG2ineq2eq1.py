@@ -22,9 +22,9 @@ try:
         return x[2]-2
     
     constraints = [{"type":"eq","fun":g1},{"type":"ineq","fun":g2},{"type":"ineq","fun":g3},{"type":"eq","fun":g4}]
-    x0 = [-10+20*random(),-10+20*random(),-10+20*random()]
+    x0 = [-4.0, 0.0, 2.0]
     
-    optimum = opt.minimize(f,x0,constraints=constraints,method='grg',file_tag="_test",max_processes=1,termination_tol=1e-9,central_diff=False)
+    optimum = opt.minimize(f,x0,constraints=constraints,method='grg',file_tag="_test",max_processes=1,termination_tol=1e-9,central_diff=False, verbose=True)
     print("Optimum value: {0}".format(optimum.f))
     print("Optimum point: {0}".format(optimum.x.flatten()))
     print("Return message: {0}".format(optimum.message))
