@@ -707,7 +707,7 @@ def _get_delta_x(x0, f0, f, g, P0, n_vars, n_cstr, n_ineq_cstr, del_2_L0, del_f0
     f1 = f.f(x1)
     P1 = np.copy(f1)
     for i in range(n_cstr):
-        P1 += np.asscalar(abs(l[i])*abs(g1[i]))
+        P1 += abs(l[i])*abs(g1[i])
     if settings.verbose:
         print("Point: {0}, Objective: {1}, Penalty: {2}".format(
             x1.flatten(), f1, P1))
@@ -728,7 +728,7 @@ def _get_delta_x(x0, f0, f, g, P0, n_vars, n_cstr, n_ineq_cstr, del_2_L0, del_f0
                 elif l[i] == 0 and g1[i] < 0:  # We may have started violating a new constraint
                     P1 += abs(g1[i])
                     continue
-            P1 += np.asscalar(abs(g1[i]))
+            P1 += abs(g1[i])
         if settings.verbose:
             print("Point: {0}, Objective: {1}, Penalty: {2}".format(
                 x1.flatten(), f1, P1))
@@ -740,7 +740,7 @@ def _get_x_lambda(n_vars, n_cstr, del_2_L0, del_g0, del_f0, g0, cstr_b):
     # Does something
 
     # Get number of binding constraints
-    n_bind = np.asscalar(sum(cstr_b))
+    n_bind = np.count_nonzero(cstr_b)
 
     # Create linear system to solve for delta_x and lambda
     A = np.zeros((n_vars+n_bind, n_vars+n_bind))
@@ -780,14 +780,12 @@ def _grg(f, g, x_start, settings):
         # Evaluate current point
         del_f0, del_g0 = _eval_grad(x0, f, g, n_vars, n_cstr)
 
-        append_file(iter, iter, iter, f0, mag_dx, x0,
-                    del_f0, settings, g=g0, del_g=del_g0)
+        append_file(iter, iter, iter, f0, mag_dx, x0, del_f0, settings, g=g0, del_g=del_g0)
 
         # Determine binding constraints
         # Equality constraints are always binding.
-        cstr_b = np.reshape([list(g0[:n_ineq_cstr].flatten(
-        ) <= settings.cstr_tol)+[True for i in range(n_cstr-n_ineq_cstr)]], (n_cstr, 1))
-        n_binding = np.asscalar(sum(cstr_b))
+        cstr_b = np.array(list(g0[:n_ineq_cstr] <= settings.cstr_tol) + [True for i in range(n_cstr-n_ineq_cstr)])
+        n_binding = np.count_nonzero(cstr_b)
 
         # If there are more binding constraints than design variables, we must ignore some binding constraints to ensure linear independence.
         # Equality constraints will never be ignored.
@@ -800,19 +798,19 @@ def _grg(f, g, x_start, settings):
                 if cstr_b[i] and unbound < n_binding-n_vars:
                     cstr_b[i] = False
                     unbound += 1
-        n_binding = sum(cstr_b).item()
+        n_binding = np.count_nonzero(cstr_b)
 
         if settings.verbose:
             print("{0} binding constraints".format(n_binding))
 
-        d_psi_d_x0 = - \
-            del_g0.T[np.repeat(cstr_b, n_vars, axis=1)].reshape((n_binding, n_vars))
-        cstr_b = cstr_b.flatten()
+        # Assemble derivatives of binding constraints
+        d_psi_d_x0 = -del_g0[:,cstr_b].T
 
         # Add slack variables
-        s0 = g0[cstr_b].reshape((n_binding, 1))
+        s0 = g0[cstr_b]
+
         # We place the slack variables first since we would prefer those be the independent variables
-        variables0 = np.concatenate((s0, x0.reshape((n_vars, 1))), axis=0)
+        variables0 = np.concatenate((s0, x0), axis=0)
 
         # Partition variables
         z0, del_f_z0, d_psi_d_z0, z_ind0, y0, del_f_y0, d_psi_d_y0, y_ind0 = _partition_vars(n_vars, n_binding, variables0, del_f0, d_psi_d_x0, settings)
