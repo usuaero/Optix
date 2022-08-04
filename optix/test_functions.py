@@ -43,4 +43,4 @@ def matyas(z):
 
     x = z[0]
     y = z[1]
-    return 0.26(x**2 + y**2) - 0.48*x*y
+    return 0.26*(x**2 + y**2) - 0.48*x*y
