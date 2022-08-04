@@ -6,6 +6,7 @@ from optix.helpers import print_setup, get_constraints, eval_write, format_outpu
 from optix.grg import grg
 from optix.sqp import sqp
 from optix.bfgs import bfgs
+from optix.nelder_mead import nelder_mead
 
 np.set_printoptions(precision=14)
 np.seterr(all='warn')
@@ -202,8 +203,6 @@ def minimize(fun, x0, **kwargs):
 
         # Initialize constraints
         constraints = kwargs.get('constraints', None)
-        if constraints == None:
-            settings.method = "bfgs"
 
         g, n_cstr, n_ineq_cstr = get_constraints(
             kwargs.get("constraints"), pool, queue, settings)
@@ -266,6 +265,10 @@ def _find_minimum(f, g, x_start, settings):
     # GRG
     elif settings.method == "grg":
         return grg(f, g, x_start, settings)
+
+    # Nelder-Mead
+    elif settings.method == "nelder-mead":
+        return nelder_mead(f, x_start, settings)
 
     else:
         raise ValueError("Method improperly specified.")

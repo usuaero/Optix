@@ -14,22 +14,23 @@ def print_setup(n_vars, x_start, n_cstr, n_ineq_cstr, settings):
     print("Optimizing in {0} variables.".format(n_vars))
     print("Initial guess:\n{0}".format(x_start))
 
-    print()
-    print('---------- Constraints ----------')
-    print('{0} total constraints'.format(n_cstr))
-    print('{0} inequality constraints'.format(n_ineq_cstr))
-    print('{0} equality constraints'.format(n_cstr-n_ineq_cstr))
-    print('***Please note, Optix will rearrange constraints so the inequality constraints are listed first.')
-    print('***Otherwise, the order is maintained.')
+    if settings.method == "grg" or settings.method == "sqp":
+        print()
+        print('---------- Constraints ----------')
+        print('{0} total constraints'.format(n_cstr))
+        print('{0} inequality constraints'.format(n_ineq_cstr))
+        print('{0} equality constraints'.format(n_cstr-n_ineq_cstr))
+        print('***Please note, Optix will rearrange constraints so the inequality constraints are listed first.')
+        print('***Otherwise, the order is maintained.')
 
     print()
     print('---------- Settings ----------')
     print('            method: {0}'.format(settings.method))
     print('     obj func args: {0}'.format(settings.args))
-    print('     initial alpha: {0}'.format(settings.alpha_init))
+    if settings.method != "nelder-mead":
+        print('     initial alpha: {0}'.format(settings.alpha_init))
     print('    stopping delta: {0}'.format(settings.termination_tol))
     print('     max processes: {0}'.format(settings.max_processes))
-    print(' dx (finite diffs): {0}'.format(settings.dx))
     print('          file tag: {0}'.format(settings.file_tag))
     print('           verbose: {0}'.format(settings.verbose))
     if settings.use_finite_diff:
@@ -37,6 +38,7 @@ def print_setup(n_vars, x_start, n_cstr, n_ineq_cstr, settings):
             print('using central difference approximation')
         else:
             print('using forward difference approximation')
+        print('  finite diff step: {0}'.format(settings.dx))
     print()
 
 

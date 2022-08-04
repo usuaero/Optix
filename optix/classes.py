@@ -96,6 +96,14 @@ class Settings:
         if self.method == "bgfs" and (bounds != None or constraints != None):
             raise ValueError("Bounds or constraints may not be specified for the simple BGFS algorithm.")
 
+        # Settings for Nelder-Mead
+        if self.method == "nelder-mead":
+            self.alpha = kwargs.get("reflection_coef", 1.0)
+            self.gamma = kwargs.get("expansion_coef", 2.0)
+            self.rho = kwargs.get("contraction_coef", 0.5)
+            self.sigma = kwargs.get("shrink_coef", 0.5)
+            self.use_finite_diff = False
+
 
 class OptimizerResult:
     """Return data from the 'minimize' function"""

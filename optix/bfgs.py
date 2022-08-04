@@ -11,7 +11,7 @@ def bfgs(f, x_start, settings):
     """Performs quasi-Newton, unconstrained optimization using the BFGS Hessian update."""
 
     # Initialize
-    iter = -1
+    iteration = -1
     n = len(x_start)
     o_iter = -1
     mag_dx = 1
@@ -19,7 +19,7 @@ def bfgs(f, x_start, settings):
     alpha_guess = None
 
     # Outer loop. Sets the N matrix to [I].
-    while iter < settings.max_iterations and mag_dx > settings.termination_tol:
+    while iteration < settings.max_iterations and mag_dx > settings.termination_tol:
 
         # Print Hessian message
         if settings.verbose:
@@ -28,13 +28,13 @@ def bfgs(f, x_start, settings):
         # Initialize iterations
         o_iter += 1
         i_iter = 0
-        iter += 1
+        iteration += 1
 
         # Get starting point
         f0_eval = f.pool.apply_async(f.f, (x0,))
         del_f0 = f.del_f(x0)
         f0 = f0_eval.get()
-        append_file(iter, o_iter, i_iter, f0, 0.0, x0, del_f0, settings)
+        append_file(iteration, o_iter, i_iter, f0, 0.0, x0, del_f0, settings)
         N0 = np.eye(n)*settings.hess_init
 
         # Determine search direction and perform line search
@@ -50,17 +50,17 @@ def bfgs(f, x_start, settings):
         mag_dx = alpha
 
         # Inner loop. Uses BFGS update for N.
-        while iter < settings.max_iterations and mag_dx > settings.termination_tol:
+        while iteration < settings.max_iterations and mag_dx > settings.termination_tol:
             i_iter += 1
-            iter += 1
+            iteration += 1
 
             # Update gradient and output file
             del_f1 = f.del_f(x1)
-            append_file(iter, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings)
+            append_file(iteration, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings)
 
             # Check for gradient termination
             if np.linalg.norm(del_f1) < settings.grad_tol:
-                return OptimizerResult(f1, x1, True, "Gradient tolerance reached.", iter, f.eval_calls.value)
+                return OptimizerResult(f1, x1, True, "Gradient tolerance reached.", iteration, f.eval_calls.value)
 
             # Check second Wolfe condition. If not satisfied, reset BFGS update.
             if np.inner(delta_x0.T, del_f1.T) < settings.wolfe_curv*np.inner(delta_x0.T, del_f0.T):
@@ -95,7 +95,7 @@ def bfgs(f, x_start, settings):
             x1 = x2
             f1 = f2
 
-    return OptimizerResult(f2, x2, True, "Step tolerance reached.", iter, f.eval_calls.value)
+    return OptimizerResult(f2, x2, True, "Step tolerance reached.", iteration, f.eval_calls.value)
 
 
 def _get_N(N0, delta_x0, del_f0, del_f1):
