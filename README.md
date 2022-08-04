@@ -3,38 +3,28 @@ AeroLab Optimization Software
 
 Created by:
 
-Dr Doug Hunsaker (professor, Utah State University; director, USU AeroLab)
-
-Josh Hodson (graduate student, Utah State University)
-
-Cory Goates (undergraduate student, Utah State University)
+* Dr Doug Hunsaker (professor, Utah State University; director, USU AeroLab)
+* Josh Hodson (graduate student, Utah State University)
+* Cory Goates (undergraduate/graduate student, Utah State University)
 
 NOTE FOR LEGACY OPTIX USERS:
 
-Since January of 2019, API of Optix has changed significantly to somewhat
-mirror that of scipy.optimize. We continue working to improve the API and
-functionality of Optix. This README will always contain up to date 
-information for using Optix.
+Since January of 2019, API of Optix has changed significantly to somewhat mirror that of scipy.optimize. We continue working to improve the API and functionality of Optix. This README will always contain up to date information for using Optix.
 
-BOUNDS FUNCTIONALITY IN OPTIX IS NOT AVAILABLE.
+## About
 
-Optix is a gradient-based optimization tool designed with aerodynamics
-in mind. Recognizing that aerodynamic functions are often computationally
-intensive, Optix has been designed to be as light-weight and parallel
-as possible, while offering an intuitive API.
+Optix is a gradient-based optimization tool designed with aerodynamics in mind. Recognizing that aerodynamic functions are often computationally intensive, Optix has been designed to be as light-weight and parallel as possible, while offering an intuitive API.
 
-The algorithms have been developed, for the most part, using the following
-references:
+The algorithms have been developed, for the most part, using the following references:
 
-Parkinson, Balling, Hedengren, "Optimization Methods for Engineering Design",
-Brigham Young University, 2013.
+* Parkinson, Balling, Hedengren, *Optimization Methods for Engineering Design*, Brigham Young University, 2013.
+* Martins, Ning, *Engineering Design Optimization*, electronically published, 2020.
 
 THIS SOFTWARE COMES WITH ABSOLUTELY NO WARRANTY EXPRESSED OR IMPLIED
 
 ## API
 
-All functionality of Optix is wrapped within the minimize() function in
-optix.py. The following is an example of how this function is used.
+All functionality of Optix is wrapped within the minimize(). The following is an example of how this function is used:
 
 ```python
 import optix as opt
@@ -51,35 +41,21 @@ print("Optimum point: {0}".format(optimum.x))
 print("Function calls: {0}".format(optimum.obj_calls))
 ```
 
-## FILE OUTPUTS
+## File Outputs
 
-optix.py will also output results to 3 .txt files. These 3 files are named optimize, gradient,
-and evaluations, each appended with the user-specified file tag. The first two are written
-to during runtime. The last is written to only after successful completion of the optimization.
-Optimize mimics what is printed to the command line, giving information about the fitness,
-point in the design space, magnitude of steps, etc. Gradient gives information about the 
-objective and constraint gradients at each point in the optimization. Evaluations simply
-outputs the value of the objective function at each point considered during optimization,
-including points used to calculate finite differences.
+Running ```optix.minimize()``` will also output results to 3 text files. These 3 files are named ```iterations```, ```gradient```, and ```evaluations```, each appended with the user-specified file tag. The first two are written to during runtime. The last is written to only after successful completion of the optimization.  Optimize mimics what is printed to the command line, giving information about the fitness, point in the design space, magnitude of steps, etc. Gradient gives information about the objective and constraint gradients at each point in the optimization. Evaluations simply outputs the value of the objective function at each point considered during optimization, including points used to calculate finite differences.
 
 ## Documentation
 
-For documentation, please refer to the docstrings. This can be done either by using the
-built in python help() command in the interpreter or by refering to the source. For
-example, to view the minimize() parameters and return values, type:
+For documentation, please refer to the docstrings. This can be done either by using the built in python help() command in the interpreter or by refering to the source. For example, to view the ```minimize()``` parameters and return values, type:
 
+```
     help(optix.minimize)
+```
 
-Please note that optix should be imported first.
+into a Python interpreter. Please note that Optix should be imported first.
 
-## Installation
-
-The Optix package can be installed by navigating to the root directory of the project
-and using the following command
-
-   python setup.py install
-
-### Getting the Source Code
+## Getting the Source Code
 
 The source code can be found at [https://github.com/usuaero/Optix](https://github.com/usuaero/Optix)
 
@@ -89,7 +65,7 @@ version of Git installed, you will not be able to use this second option unless
 you first download and install Git. If you are unsure, you can check by typing 
 `git --version` into a command prompt.
 
-#### Downloading source as a ZIP file
+### Downloading source as a ZIP file
 
 1. Open a web browser and navigate to [https://github.com/usuaero/Optix](https://github.com/usuaero/Optix)
 2. Make sure the Branch is set to `Master`
@@ -97,16 +73,31 @@ you first download and install Git. If you are unsure, you can check by typing
 4. Select `Download ZIP`
 5. Extract the downloaded ZIP file to a local directory on your machine
 
-#### Cloning the Github repository
+### Cloning the Github repository
 
 1. From the command prompt navigate to the directory where Optix will be installed
 2. `git clone https://github.com/usuaero/Optix`
 
+## Installation
+
+The Optix package can be installed by navigating to the root directory of the project
+and using the following command
+
+```
+   pip install .
+```
+
+This installs Optix as a package on your machine, meaning you can import Optix into any Python script without having to copy around the source files
+
 ## Testing
 
-Unit tests are are run using the following command.
+Unit tests are are run using the following command:
 
-'python3 test.py'
+```
+    py.test
+```
+
+Please note that you must have Pytest installed for this to work.
 
 ## Support 
 
