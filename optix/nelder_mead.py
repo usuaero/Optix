@@ -28,9 +28,6 @@ def nelder_mead(f, x_start, settings):
 
         # Increment iteration
         iteration += 1
-        print()
-        print(x_simp)
-        print(f_simp)
 
         # Sort simplex vertices based on objective function value
         i_sorted = np.argsort(f_simp)
@@ -101,7 +98,7 @@ def nelder_mead(f, x_start, settings):
                     continue
 
         # If we've made it here, then the simplex needs to shrink
-        for i in range(1,N):
+        for i in range(1, N+1):
 
             x_simp[i_sorted[i],:] = x_simp[i_sorted[0],:] + settings.sigma*(x_simp[i_sorted[i],:] - x_simp[i_sorted[0],:])
         
