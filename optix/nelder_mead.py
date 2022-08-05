@@ -2,6 +2,7 @@ import numpy as np
 import multiprocessing_on_dill as mp
 
 from optix.classes import OptimizerResult
+from optix.helpers import append_file
 
 
 def nelder_mead(f, x_start, settings):
@@ -31,6 +32,9 @@ def nelder_mead(f, x_start, settings):
 
         # Sort simplex vertices based on objective function value
         i_sorted = np.argsort(f_simp)
+
+        # Output
+        append_file(iteration, iteration, iteration, f_simp[i_sorted[0]], 0.0, x_simp[i_sorted[0]], settings)
 
         # Check distances from minimum
         for i in range(1,N+1):

@@ -5,8 +5,8 @@ import copy
 import numpy as np
 import multiprocessing_on_dill as mp
 
-from optix.classes import Settings, OptimizerResult, Objective, Quadratic
-from optix.helpers import append_file, print_setup, get_constraints, eval_write, format_output_files, eval_grad, eval_constr
+from optix.classes import OptimizerResult
+from optix.helpers import append_file, eval_grad, eval_constr
 
 
 def grg(f, g, x_start, settings):
@@ -29,7 +29,7 @@ def grg(f, g, x_start, settings):
         # Evaluate current point
         del_f0, del_g0 = eval_grad(x0, f, g, n_vars, n_cstr)
 
-        append_file(iter, iter, iter, f0, mag_dx, x0, del_f0, settings, g=g0, del_g=del_g0)
+        append_file(iter, iter, iter, f0, mag_dx, x0, settings, gradient=del_f0, g=g0, del_g=del_g0)
 
         # Determine binding constraints
         # Equality constraints are always binding.
@@ -100,7 +100,7 @@ def grg(f, g, x_start, settings):
         g0 = g1
 
     del_f0, del_g0 = eval_grad(x0, f, g, n_vars, n_cstr)
-    append_file(iter+1, iter+1, iter+1, f0, mag_dx, x0, del_f0, settings, g=g0, del_g=del_g0)
+    append_file(iter+1, iter+1, iter+1, f0, mag_dx, x0, settings, gradient=del_f0, g=g0, del_g=del_g0)
     cstr_calls = []
     for i in range(n_cstr):
         cstr_calls.append(g[i].eval_calls.value)

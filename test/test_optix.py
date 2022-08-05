@@ -193,6 +193,21 @@ def test_SQP_5_ineq_cstr_8_processors():
     assert(abs(optimum.x[2] - 1.0) < 1e-2)
 
 
+def test_nelder_mead_3_dims_rosenbrock():
+
+    x0 = [-4.0, 0.0, 2.0]
+    
+    optimum = opt.minimize(opt.test_functions.rosenbrock, x0, method='nelder-mead', file_tag="_test", max_processes=1, termination_tol=1e-12)
+
+    print("Optimum value: {0}".format(optimum.f))
+    print("Optimum point: {0}".format(optimum.x))
+
+    assert(abs(optimum.f) < 1e-12)
+    assert(abs(optimum.x[0] - 1.0) < 1e-6)
+    assert(abs(optimum.x[1] - 1.0) < 1e-6)
+    assert(abs(optimum.x[2] - 1.0) < 1e-6)
+
+
 def test_cleanup():
     # Removes generated files
 

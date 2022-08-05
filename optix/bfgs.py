@@ -3,8 +3,8 @@ import itertools
 import numpy as np
 import multiprocessing_on_dill as mp
 
-from optix.classes import Settings, Objective, Quadratic, OptimizerResult
-from optix.helpers import print_setup, get_constraints, eval_write, format_output_files, append_file
+from optix.classes import Quadratic, OptimizerResult
+from optix.helpers import append_file
 
 
 def bfgs(f, x_start, settings):
@@ -34,7 +34,7 @@ def bfgs(f, x_start, settings):
         f0_eval = f.pool.apply_async(f.f, (x0,))
         del_f0 = f.del_f(x0)
         f0 = f0_eval.get()
-        append_file(iteration, o_iter, i_iter, f0, 0.0, x0, del_f0, settings)
+        append_file(iteration, o_iter, i_iter, f0, 0.0, x0, settings, gradient=del_f0)
         N0 = np.eye(n)*settings.hess_init
 
         # Determine search direction and perform line search
@@ -56,7 +56,7 @@ def bfgs(f, x_start, settings):
 
             # Update gradient and output file
             del_f1 = f.del_f(x1)
-            append_file(iteration, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings)
+            append_file(iteration, o_iter, i_iter, f1, mag_dx, x1, settings, gradient=del_f1)
 
             # Check for gradient termination
             if np.linalg.norm(del_f1) < settings.grad_tol:

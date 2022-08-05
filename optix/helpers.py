@@ -69,11 +69,12 @@ def get_constraints(constraints, pool, queue, settings):
     return g, n_cstr, n_ineq_cstr
 
 
-def append_file(iter, o_iter, i_iter, obj_fcn_value, mag_dx, design_point, gradient, settings, **kwargs):
+def append_file(iter, o_iter, i_iter, obj_fcn_value, mag_dx, design_point, settings, **kwargs):
     # Writes a new iteration to the output files
 
     g = kwargs.get("g")
     del_g = kwargs.get("del_g")
+    gradient = kwargs.get("gradient")
 
     msg = '{0:4d}, {1:5d}, {2:5d}, {3: 20.13E}, {4: 20.13E}'.format(
         iter, o_iter, i_iter, obj_fcn_value, mag_dx)
@@ -89,15 +90,16 @@ def append_file(iter, o_iter, i_iter, obj_fcn_value, mag_dx, design_point, gradi
     with open(settings.opt_file, 'a') as opt_file:
         print(values_msg, file=opt_file)
 
-    grad_msg = msg
-    for grad in gradient:
-        grad_msg = ('{0}, {1:20.13E}'.format(grad_msg, grad))
-    if not del_g is None:
-        for i in range(settings.n_cstr):
-            for j in range(len(design_point)):
-                grad_msg = ('{0}, {1:20.13E}'.format(grad_msg, del_g[j,i]))
-    with open(settings.grad_file, 'a') as grad_file:
-        print(grad_msg, file=grad_file)
+    if isinstance(gradient, np.ndarray):
+        grad_msg = msg
+        for grad in gradient:
+            grad_msg = ('{0}, {1:20.13E}'.format(grad_msg, grad))
+        if not del_g is None:
+            for i in range(settings.n_cstr):
+                for j in range(len(design_point)):
+                    grad_msg = ('{0}, {1:20.13E}'.format(grad_msg, del_g[j,i]))
+        with open(settings.grad_file, 'a') as grad_file:
+            print(grad_msg, file=grad_file)
 
 
 def eval_write(filename, header, q):

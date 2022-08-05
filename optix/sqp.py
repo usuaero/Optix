@@ -3,8 +3,8 @@ import itertools
 import numpy as np
 import multiprocessing_on_dill as mp
 
-from optix.classes import Settings, OptimizerResult, Objective, Quadratic
-from optix.helpers import append_file, print_setup, get_constraints, eval_write, format_output_files, eval_grad, eval_constr
+from optix.classes import OptimizerResult
+from optix.helpers import append_file, eval_grad, eval_constr
 
 
 def sqp(f, g, x_start, settings):
@@ -34,7 +34,7 @@ def sqp(f, g, x_start, settings):
         del_f0, del_g0 = eval_grad(x0, f, g, n_vars, n_cstr)
         del_2_L0 = np.eye(n_vars)*settings.hess_init
         f0 = f0_eval.get()
-        append_file(iteration, o_iter, i_iter, f0, 0.0, x0, del_f0, settings, g=g0, del_g=del_g0)
+        append_file(iteration, o_iter, i_iter, f0, 0.0, x0, settings, gradient=del_f0, g=g0, del_g=del_g0)
 
         # Estimate initial penalty function. We allow this to be artificially high.
         P0 = np.copy(f0)
@@ -67,7 +67,7 @@ def sqp(f, g, x_start, settings):
             # Update the Lagrangian Hessain
             del_2_L1 = _get_del_2_L(del_2_L0, del_f0, del_f1, l, del_g0, del_g1, n_vars, n_cstr, delta_x)
 
-            append_file(iteration, o_iter, i_iter, f1, mag_dx, x1, del_f1, settings, g=g1, del_g=del_g1)
+            append_file(iteration, o_iter, i_iter, f1, mag_dx, x1, settings, gradient=del_f1, g=g1, del_g=del_g1)
 
             # Get step
             delta_x, l, x2, f2, g2, P2 = _get_delta_x(x1, f1, f, g, P1, n_vars, n_cstr, n_ineq_cstr, del_2_L1, del_f1, del_g1, g1, settings)
@@ -103,8 +103,7 @@ def sqp(f, g, x_start, settings):
     del_g1 = np.zeros((n_vars, n_cstr))
     for i in range(n_cstr):
         del_g1[:, i] = g[i].del_g(x1).flatten()
-    append_file(iteration, o_iter, i_iter, f1, mag_dx, x1,
-                del_f1, settings, g=g1, del_g=del_g1)
+    append_file(iteration, o_iter, i_iter, f1, mag_dx, x1, settings, gradient=del_f1, g=g1, del_g=del_g1)
     cstr_calls = []
     for i in range(n_cstr):
         cstr_calls.append(g[i].eval_calls.value)
