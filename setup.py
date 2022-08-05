@@ -1,10 +1,10 @@
-"""Optix: A Python, gradient-based optimization library."""
+"""Optix: A Python optimization library."""
 
 from setuptools import setup
 
 setup(name = 'Optix',
-    version = '2.0',
-    description = 'Continuous, multivariable optimization tool with native multiprocessing.',
+    version = '2.1',
+    description = 'Multivariable optimization tool with native multiprocessing.',
     url = 'https://github.com/usuaero/Optix',
     author = 'usuaero',
     author_email = 'doug.hunsaker@usu.edu',
