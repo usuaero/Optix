@@ -37,6 +37,7 @@ def minimize(fun, x0, **kwargs):
 
                 Unconstrained problem:
                     "bfgs" - quasi-Newton with bfgs Hessian update
+                    "nelder-mead" - Nelder-Mead simplex optimization (gradient-free)
 
                 Constrained problem:
                     "sqp" - sequential quadratic programming
@@ -182,6 +183,21 @@ def minimize(fun, x0, **kwargs):
 
         cstr_tol : float, optional
             A constraint is considered to be binding if it evaluates to less than this number. Defaults to 1e-4.
+
+        Nelder-Mead
+
+        reflection_coef : float, optional
+            Reflection parameter. Defaults to 1.0.
+
+        expansion_coef : float, optional
+            Expansion parameter. Defaults to 2.0.
+
+        contraction_coef : float, optional
+            Contraction parameter. Defaults to 0.5.
+
+        shrink_coef : float, optional
+            Shrink parameter. Defaults to 0.5.
+
     """
 
     # Initialize settings
